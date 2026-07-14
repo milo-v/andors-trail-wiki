@@ -5,6 +5,7 @@ import Main from './components/Main.jsx';
 import XMLParser from 'react-xml-parser';
 import parseXmlMap from './utils/MapParser.jsx';
 import parseGlobalMap from './utils/GlobalMapParser.jsx';
+import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from './utils/dataCache';
 
 function App() {
   const [data,setData]=useState([]);
@@ -73,15 +74,26 @@ function App() {
 
   const getMaps=(temp, thenDo)=>{
     var maps = temp.resources.loadresource_maps;
-    var downcounter = {progress:maps.length+1, tryDo:()=>thenDo(temp)};
+    var downcounter = {progress:maps.length+1, tryDo:()=>{
+      setCachedData(appCacheKey, temp);
+      thenDo(temp);
+    }};
     getGlobalMap(downcounter);
     maps.forEach((path)=>{
       getXmlMap(path.replace('@','/')+".tmx", path.replace('@xml/',''), downcounter);
     });
   }
-  
+
+  const appCacheKey = `app-v${CACHE_SCHEMA_VERSION}-${process.env.REACT_APP_AT_VERSION}`;
+
   useEffect(()=>{
-    getXmlData('/values/loadresources.xml', saveTempResources);
+    getCachedData(appCacheKey).then((cached) => {
+      if (cached) {
+        setData(cached);
+      } else {
+        getXmlData('/values/loadresources.xml', saveTempResources);
+      }
+    });
   },[])
 
   return (
