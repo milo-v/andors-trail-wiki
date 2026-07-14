@@ -2,6 +2,7 @@
   "name": "reactapp",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://milo-v.github.io/andors-trail-wiki",
   "dependencies": {
     "@nadavshaar/react-grid-table": "^0.2.0",
     "@testing-library/jest-dom": "^5.11.9",

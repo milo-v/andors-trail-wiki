@@ -1,0 +1,118 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GAME_REPO: AndorsTrailRelease/andors-trail
+
+jobs:
+  check-version:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare upstream game version to committed .env
+        id: compare
+        run: |
+          UPSTREAM_VERSION=$(curl -sL "https://raw.githubusercontent.com/${GAME_REPO}/master/AndorsTrail/app/src/main/AndroidManifest.xml" | grep -oP 'android:versionName="\K[^"]+' || true)
+          if [ -z "$UPSTREAM_VERSION" ]; then
+            echo "Could not read upstream version" >&2
+            exit 1
+          fi
+          CURRENT_VERSION=$(grep -oP 'REACT_APP_AT_VERSION=\K.+' .env || true)
+          echo "Upstream: $UPSTREAM_VERSION / Current: $CURRENT_VERSION"
+          if [ "$UPSTREAM_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-deploy:
+    needs: [check-version]
+    if: |
+      always() &&
+      needs.check-version.result != 'failure' &&
+      (github.event_name != 'schedule' || needs.check-version.outputs.changed == 'true')
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --openssl-legacy-provider
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - run: npm ci
+
+      - name: Clone game resources
+        run: git clone --depth 1 "https://github.com/${GAME_REPO}.git" ../andors-trail
+
+      - name: Link game resources
+        run: make link
+
+      - name: Update version and regenerate maps (scheduled run only)
+        if: github.event_name == 'schedule'
+        run: |
+          node bin/getVersion.js
+          mkdir -p public/backgrounds
+          node bin/generateMapImages.js
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .env
+          if ! git diff --cached --quiet -- .env; then
+            git commit -m "Update game version to $(grep -oP 'REACT_APP_AT_VERSION=\K.+' .env)"
+            git push
+          fi
+
+      - name: Restore cached map backgrounds (non-scheduled runs)
+        if: github.event_name != 'schedule'
+        id: cache-backgrounds
+        uses: actions/cache@v4
+        with:
+          path: public/backgrounds
+          key: backgrounds-${{ hashFiles('.env') }}
+
+      - name: Generate map images (cache miss)
+        if: github.event_name != 'schedule' && steps.cache-backgrounds.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p public/backgrounds
+          node bin/generateMapImages.js
+
+      - name: Save generated map backgrounds to cache (scheduled run only)
+        if: github.event_name == 'schedule'
+        uses: actions/cache/save@v4
+        with:
+          path: public/backgrounds
+          key: backgrounds-${{ hashFiles('.env') }}
+
+      - run: npm run build
+
+      - name: SPA fallback for GitHub Pages
+        run: cp build/index.html build/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+      - uses: actions/deploy-pages@v4
