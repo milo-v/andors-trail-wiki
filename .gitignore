@@ -27,3 +27,6 @@ yarn-error.log*
 /public/values
 /public/backgrounds
 /.env
+
+# superpowers skill working files (not committed)
+/docs/superpowers/
