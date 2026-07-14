@@ -5,15 +5,20 @@ import PropsRoute from './PropsRoute';
 import Menu from './Menu.jsx';
 import Home from './Home';
 import ItemCategoriesTable from './ItemCategoriesTable.jsx';
-import ItemsPage from './items/ItemsPage.jsx';
-import ConditionsPage from './conditions/ConditionsPage';
-import MonstersPage from './monsters/MonstersPage';
-import NpcPage from './npc/NpcPage';
-import QuestsPage from './quests/QuestsPage';
-import MapPage from './maps/MapPage';
 import calculateCost from './CostCalculator';
 import expCalculator from './ExpCalculator';
 import './Main.css';
+import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from '../utils/dataCache';
+import WayfinderPage from './wayfinder/WayfinderPage';
+
+const ItemsPage = React.lazy(() => import('./items/ItemsPage.jsx'));
+const ConditionsPage = React.lazy(() => import('./conditions/ConditionsPage'));
+const MonstersPage = React.lazy(() => import('./monsters/MonstersPage'));
+const NpcPage = React.lazy(() => import('./npc/NpcPage'));
+const QuestsPage = React.lazy(() => import('./quests/QuestsPage'));
+const MapPage = React.lazy(() => import('./maps/MapPage'));
+
+const MAIN_CACHE_KEY = `main-v${CACHE_SCHEMA_VERSION}-${process.env.REACT_APP_AT_VERSION}`;
 
 // const Loading = () => ;
 function Loading (props) {
@@ -452,6 +457,7 @@ export default class Main extends React.Component {
           that.temp[name] = that.temp[name].concat(json);
           downcounter.progress--;
           if (downcounter.progress == 0){
+              setCachedData(MAIN_CACHE_KEY, that.temp);
               that.linkTemp()
               that.setState(that.temp);
           }
@@ -464,7 +470,15 @@ export default class Main extends React.Component {
     componentDidUpdate() {
         if (!this.state.items && this.state.loadJson) {
             this.setState({loadJson: false});
-            this.getJsonResources(this.props.resources);
+            getCachedData(MAIN_CACHE_KEY).then((cached) => {
+                if (cached) {
+                    this.temp = cached;
+                    this.linkTemp();
+                    this.setState(this.temp);
+                } else {
+                    this.getJsonResources(this.props.resources);
+                }
+            });
         }
     }
 
@@ -490,17 +504,20 @@ export default class Main extends React.Component {
                             <Switch>
                                 <Menu />
                             </Switch>
-                            <Switch>
-                                <Route exact path='/' component={Home}/>
-                                <PropsRoute path='/items' component={ItemsPage} data = { this.state.items }/>
-                                <PropsRoute path='/conditions' component={ConditionsPage} data = { this.state.actorconditions }/>
-                                <PropsRoute path='/monsters' component={MonstersPage} data = { this.state.monsters }/>
-                                <PropsRoute path='/categories' component={ItemCategoriesTable} data = { this.state.itemcategories }/> 
-                                <PropsRoute path='/npc' component={NpcPage} data = { this.state.monsters }/> 
-                                <PropsRoute path='/quests' component={QuestsPage} data = { this.state.quests }/> 
-                                <PropsRoute path='/map' component={MapPage} data = { this.props.maps } globalMap = { this.props.globalMap }
-                                    expanded={this.state.expandedSubMenu} toggleExpand={this.toggleExpandSubMenu}/> 
-                            </Switch>
+                            <React.Suspense fallback={<Loading/>}>
+                                <Switch>
+                                    <Route exact path='/' component={Home}/>
+                                    <PropsRoute path='/items' component={ItemsPage} data = { this.state.items }/>
+                                    <PropsRoute path='/conditions' component={ConditionsPage} data = { this.state.actorconditions }/>
+                                    <PropsRoute path='/monsters' component={MonstersPage} data = { this.state.monsters }/>
+                                    <PropsRoute path='/categories' component={ItemCategoriesTable} data = { this.state.itemcategories }/>
+                                    <PropsRoute path='/npc' component={NpcPage} data = { this.state.monsters }/>
+                                    <PropsRoute path='/quests' component={QuestsPage} data = { this.state.quests }/>
+                                    <PropsRoute path='/map' component={MapPage} data = { this.props.maps } globalMap = { this.props.globalMap }
+                                        expanded={this.state.expandedSubMenu} toggleExpand={this.toggleExpandSubMenu}/>
+                                    <Route path='/wayfinder' component={WayfinderPage}/>
+                                </Switch>
+                            </React.Suspense>
                         </div>
                     )}
                     

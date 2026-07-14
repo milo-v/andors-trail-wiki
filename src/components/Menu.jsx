@@ -21,6 +21,7 @@ export default class Main extends React.Component {
                     {LiLink("quests")}
                     {LiLink("categories")}
                     {LiLink("map")}
+                    {LiLink("wayfinder")}
                 </ul>
             </menu>
         );
