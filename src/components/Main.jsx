@@ -526,7 +526,7 @@ export default class Main extends React.Component {
                 </div>
                 <div className="signature">
                     <div style={{float:'left'}}>
-                        2022-2025, Powered by <a href="https://github.com/reizy/andors-trail-wiki">Reizy</a>
+                        2022-2025 <a href="https://github.com/reizy/andors-trail-wiki">Reizy</a>, 2026 <a href="https://github.com/milo-v/andors-trail-wiki">MiLo</a>
                     </div>
                     <div style={{float:'right'}}>Game version {process.env.REACT_APP_AT_VERSION}</div>
                 </div>
