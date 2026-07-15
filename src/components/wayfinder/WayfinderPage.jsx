@@ -14,6 +14,7 @@ const POINTS_OF_INTEREST = [
     { label: 'Whootibarfag', map: 'blackwater_mountain55' },
     { label: 'Feygard patrol', map: 'ratdom_maze_412_up' },
     { label: 'Pub', map: 'ratdom_maze_705' },
+    { label: 'Skeleton Dance', map: 'ratdom_maze_543d' },
 ];
 
 export default function WayfinderPage() {
