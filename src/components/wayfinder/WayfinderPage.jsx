@@ -45,7 +45,7 @@ export default function WayfinderPage() {
             <ul>
                 {POINTS_OF_INTEREST.map(({ label, map, startMap }) => (
                     <li key={map}>
-                        {label}: {map}{' '}
+                        {label}: <a href={"/map/" + map} target="_blank" rel="noopener noreferrer">{map}</a>{' '}
                         <button onClick={() => setStart(startMap || map)}>Set {label} as Start</button>{' '}
                         <button onClick={() => setEnd(map)}>Set {label} as End</button>
                     </li>
@@ -89,7 +89,10 @@ export default function WayfinderPage() {
                 {path && path.length === 0 && <p>No path found.</p>}
                 {path && path.map((step, i) => (
                     <p key={i}>
-                        {step.from} -&gt; {step.to}, {DIRECTION_LABELS[step.direction] || 'unknown'}
+                        <a href={"/map/" + step.from} target="_blank" rel="noopener noreferrer">{step.from}</a>
+                        {' -> '}
+                        <a href={"/map/" + step.to} target="_blank" rel="noopener noreferrer">{step.to}</a>
+                        {', ' + (DIRECTION_LABELS[step.direction] || 'unknown')}
                     </p>
                 ))}
             </div>
