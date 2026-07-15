@@ -47,7 +47,7 @@ export default class ExpandingName extends React.Component {
         return (
               <React.Fragment>
                     <div style={{ display:'flex'}} onClick={this.toggleExpand}>
-                            <img src="../image/sort_desc.png" />
+                            <img src={process.env.PUBLIC_URL + "/image/sort_desc.png"} />
                             <span style={styles.text}>{value}</span>
                     </div>
                     <div style={styles.table}>
