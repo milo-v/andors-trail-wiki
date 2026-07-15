@@ -125,6 +125,7 @@ export default class Main extends React.Component {
         condition.link.links.push(stub);
     }
     getItemRootLink = (category) => {
+       if (!category) return "/items/other#";
        if (category.actionType == "use") return "/items/use#";
        if (category.actionType == "equip") return "/items/" + category.inventorySlot + "#";
        return "/items/other#";
@@ -328,8 +329,9 @@ export default class Main extends React.Component {
                 item.displaytype = item.displaytype||'ordinary';
                 item.iconBg = this.getItemIconBg(item);
                 item.categoryLink = this.temp.maps.categories[item.category];
+                if (!item.categoryLink) debug("Item '" + item.id + "' has no resolvable category '" + item.category + "'");
                 item.rootLink=this.getItemRootLink(item.categoryLink);
-                item.baseMarketCost=calculateCost(item, item.categoryLink.inventorySlot=="weapon");
+                item.baseMarketCost=calculateCost(item, item.categoryLink?.inventorySlot=="weapon");
                 item.priceCost = item.baseMarketCost + Math.trunc(item.baseMarketCost * 0.15);
 
                 item.conditionsCount = this.countConditions(item.equipEffect)
