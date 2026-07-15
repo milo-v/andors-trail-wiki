@@ -94,7 +94,7 @@ export default class Main extends React.Component {
         const that = this;
         downcounter.progress += resource.length;
         await Promise.all(resource.map(
-            path => that.getJsonData(path.replace('@','/'), name, that, downcounter)
+            path => that.getJsonData(process.env.PUBLIC_URL+path.replace('@','/'), name, that, downcounter)
         ));
 
         this.setState({progress: this.state.progress - resource.length});

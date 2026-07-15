@@ -23,7 +23,7 @@ const styles = {
 
 const getSrc = (id) => {
     const tmp = id?.split(":")
-    return "/drawable/"+tmp[0]+".png";
+    return process.env.PUBLIC_URL+"/drawable/"+tmp[0]+".png";
 }
 const getTypePosition = (dt) => {
     switch(dt) {

@@ -63,5 +63,5 @@ const Range = (o) => {
 }
 const IconCell = (data) => {
     const href = (data.rootLink) + data.id;
-    return <Link to={href}><img title={data.id} src="/image/ui_icon_quest.png"/></Link>
+    return <Link to={href}><img title={data.id} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/></Link>
 }

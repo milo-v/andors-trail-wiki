@@ -24,7 +24,7 @@ export default class MonstersPage extends React.Component {
                 height: row.link.height * zoom,
             };
             const href = "/map/" + row.id;
-            const src = "/backgrounds/" + row.id + ".jpg";
+            const src = process.env.PUBLIC_URL + "/backgrounds/" + row.id + ".jpg";
             return (
                 <Link style={style} title={row.id} key={index} to={href}>
                     <img style={style2} src={src} />

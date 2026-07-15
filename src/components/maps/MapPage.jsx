@@ -26,7 +26,7 @@ export default class Page extends React.Component {
         return (
             <div>
                 <ul className="hr">
-                    <img src="/image/sort_desc.png" style={{float:'left', marginTop:-10}} onClick={this.props.toggleExpand}/>
+                    <img src={process.env.PUBLIC_URL+"/image/sort_desc.png"} style={{float:'left', marginTop:-10}} onClick={this.props.toggleExpand}/>
                     {(this.props.expanded) && this.getSegmentLinks(globalMap, location.pathname)}
                 </ul>
                 <Switch>

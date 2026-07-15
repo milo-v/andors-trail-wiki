@@ -125,7 +125,7 @@ const IconCell = ({tableManager, value, onChange, isEdit, data, column, rowIndex
     const href = (data.rootLink) + data.id;
     return <Link to={href}>
                <div id={value} className="TableAncor"/>
-               <img style={{paddingLeft: 1, paddingTop: 5}} src="/image/ui_icon_quest.png"/>
+               <img style={{paddingLeft: 1, paddingTop: 5}} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/>
            </Link>
 }
 const TextCell = ({tableManager, value, onChange, isEdit, data, column, rowIndex, searchText, isFirstEditableCell}) => {

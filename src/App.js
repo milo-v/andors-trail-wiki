@@ -69,7 +69,7 @@ function App() {
         downcounter.tryDo();
       }
     }
-    getXmlData("/xml/worldmap.xml", thenDo);
+    getXmlData(process.env.PUBLIC_URL+"/xml/worldmap.xml", thenDo);
   }
 
   const getMaps=(temp, thenDo)=>{
@@ -80,7 +80,7 @@ function App() {
     }};
     getGlobalMap(downcounter);
     maps.forEach((path)=>{
-      getXmlMap(path.replace('@','/')+".tmx", path.replace('@xml/',''), downcounter);
+      getXmlMap(process.env.PUBLIC_URL+path.replace('@','/')+".tmx", path.replace('@xml/',''), downcounter);
     });
   }
 
@@ -91,7 +91,7 @@ function App() {
       if (cached) {
         setData(cached);
       } else {
-        getXmlData('/values/loadresources.xml', saveTempResources);
+        getXmlData(process.env.PUBLIC_URL+'/values/loadresources.xml', saveTempResources);
       }
     });
   },[])

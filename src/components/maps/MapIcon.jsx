@@ -39,7 +39,7 @@ export default class Icon extends React.Component {
 }
     const getSrc = (file) => {
         if (!file) return;
-        return "/drawable/"+file+".png";
+        return process.env.PUBLIC_URL+"/drawable/"+file+".png";
     }
     const getPosition = (i, ts, dx, dy, zoom) => {
         var w = ts.width * zoom / 32;

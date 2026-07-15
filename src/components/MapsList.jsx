@@ -34,7 +34,7 @@ export default class Table extends React.Component {
 
         return maps?.map((row, index)=>{
             return <Link key={index} to={row.rootLink + row.name + "#" + data[0].key} style={styles.link}>
-                        <img style={styles.img} src="/image/ui_icon_map.png"  />{row.name}
+                        <img style={styles.img} src={process.env.PUBLIC_URL+"/image/ui_icon_map.png"}  />{row.name}
                    </Link>
         })
     }

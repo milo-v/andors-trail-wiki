@@ -42,7 +42,7 @@ export default class Icon extends React.Component {
         if (!noBackground) {
             style = {
                 ...style,
-                backgroundImage: 'url("/drawable/ui_selections.png")',
+                backgroundImage: 'url("'+process.env.PUBLIC_URL+'/drawable/ui_selections.png")',
                 backgroundRepeat: 'no-repeat', 
                 backgroundPosition: (data.iconBg * d.x) + "px 0px",
                 backgroundSize: (d.x * 5) + "px " + d.y + "px",
@@ -66,7 +66,7 @@ export default class Icon extends React.Component {
 }
     const getSrc = (file) => {
         if (!file) return;
-        return "/drawable/"+file+".png";
+        return process.env.PUBLIC_URL+"/drawable/"+file+".png";
     }
     const getPosition = (i, width, d) => {
         var x = - i % width * d.x;
