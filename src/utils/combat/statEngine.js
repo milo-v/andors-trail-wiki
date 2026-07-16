@@ -4,6 +4,7 @@
 
 import { applyLevelUpChoices } from './levelModel';
 import { SKILL_IDS, SKILL_CONSTANTS, getProficiencySkillForCategory } from './skillData';
+import debug from '../debug';
 
 export const EQUIP_SLOTS = ['weapon', 'shield', 'head', 'body', 'hand', 'feet', 'neck', 'leftring', 'rightring'];
 export const ARMOR_SLOTS = ['head', 'body', 'hand', 'feet'];
@@ -241,4 +242,181 @@ export function applyEquipment(stats, equipped, skillLevels) {
     }
 
     return weaponDamage;
+}
+
+// --- Item proficiencies + general combat skills ---
+
+// SkillController.java:204-260 (applySkillEffectsFromItemProficiencies).
+export function applyItemProficiencies(stats, equipped, skillLevels) {
+    const lvl = (id) => skillLevels[id] || 0;
+    const mainWeapon = equipped.weapon;
+
+    if (mainWeapon?.equipEffect) {
+        const skill = getProficiencySkillForCategory(mainWeapon.categoryLink);
+        const level = skill ? lvl(skill) : 0;
+        if (level > 0) {
+            stats.attackChance += getPercentage(mainWeapon.equipEffect.increaseAttackChance || 0, SKILL_CONSTANTS.WEAPON_PROF_AC_PERCENT * level, 0);
+            stats.blockChance += getPercentage(mainWeapon.equipEffect.increaseBlockChance || 0, SKILL_CONSTANTS.WEAPON_PROF_BC_PERCENT * level, 0);
+            stats.criticalSkill += getPercentage(mainWeapon.equipEffect.increaseCriticalSkill || 0, SKILL_CONSTANTS.WEAPON_PROF_CS_PERCENT * level, 0);
+        }
+    }
+
+    const unarmedLevel = lvl(SKILL_IDS.WEAPON_PROF_UNARMED);
+    if (unarmedLevel > 0 && isUnarmed(equipped)) {
+        stats.attackChance += SKILL_CONSTANTS.UNARMED_AC * unarmedLevel;
+        stats.damagePotential.max += SKILL_CONSTANTS.UNARMED_DMG * unarmedLevel;
+        stats.damagePotential.min += SKILL_CONSTANTS.UNARMED_DMG * unarmedLevel;
+        stats.blockChance += SKILL_CONSTANTS.UNARMED_BC * unarmedLevel;
+    }
+
+    const shield = equipped.shield;
+    if (isShield(shield)) {
+        const skill = getProficiencySkillForCategory(shield.categoryLink);
+        const level = skill ? lvl(skill) : 0;
+        stats.damageResistance += SKILL_CONSTANTS.SHIELD_PROF_DR * level;
+    }
+
+    const unarmoredLevel = lvl(SKILL_IDS.ARMOR_PROF_UNARMORED);
+    if (unarmoredLevel > 0 && isUnarmored(equipped)) {
+        stats.blockChance += SKILL_CONSTANTS.UNARMORED_BC * unarmoredLevel;
+    }
+
+    const lightLevel = lvl(SKILL_IDS.ARMOR_PROF_LIGHT);
+    const heavyLevel = lvl(SKILL_IDS.ARMOR_PROF_HEAVY);
+    for (const slot of ARMOR_SLOTS) {
+        const item = equipped[slot];
+        if (!item?.equipEffect) continue;
+        const skill = getProficiencySkillForCategory(item.categoryLink);
+        if (skill === SKILL_IDS.ARMOR_PROF_LIGHT && lightLevel > 0) {
+            stats.blockChance += getPercentage(item.equipEffect.increaseBlockChance || 0, SKILL_CONSTANTS.LIGHT_ARMOR_BC_PERCENT * lightLevel, 0);
+        } else if (skill === SKILL_IDS.ARMOR_PROF_HEAVY && heavyLevel > 0) {
+            stats.blockChance += getPercentage(item.equipEffect.increaseBlockChance || 0, SKILL_CONSTANTS.HEAVY_ARMOR_BC_PERCENT * heavyLevel, 0);
+            stats.moveCost -= getPercentage(item.equipEffect.increaseMoveCost || 0, SKILL_CONSTANTS.HEAVY_ARMOR_MOVECOST_PERCENT * heavyLevel, 0);
+            stats.attackCost -= getPercentage(item.equipEffect.increaseAttackCost || 0, SKILL_CONSTANTS.HEAVY_ARMOR_ATKCOST_PERCENT * heavyLevel, 0);
+            stats.useItemCost -= getPercentage(item.equipEffect.increaseUseItemCost || 0, SKILL_CONSTANTS.HEAVY_ARMOR_USECOST_PERCENT * heavyLevel, 0);
+        }
+    }
+}
+
+// SkillController.java:34-59 (applySkillEffects) - general combat skills that
+// apply unconditionally, regardless of what's equipped.
+export function applyGeneralCombatSkills(stats, skillLevels) {
+    const lvl = (id) => skillLevels[id] || 0;
+
+    stats.attackChance += SKILL_CONSTANTS.WEAPON_CHANCE * lvl(SKILL_IDS.WEAPON_CHANCE);
+    stats.damagePotential.max += SKILL_CONSTANTS.WEAPON_DAMAGE_MAX * lvl(SKILL_IDS.WEAPON_DMG);
+    stats.damagePotential.min += SKILL_CONSTANTS.WEAPON_DAMAGE_MIN * lvl(SKILL_IDS.WEAPON_DMG);
+    stats.blockChance += SKILL_CONSTANTS.DODGE * lvl(SKILL_IDS.DODGE);
+    stats.damageResistance += SKILL_CONSTANTS.BARKSKIN * lvl(SKILL_IDS.BARK_SKIN);
+
+    if (stats.criticalSkill > 0 && lvl(SKILL_IDS.MORE_CRITICALS) > 0) {
+        stats.criticalSkill += (stats.criticalSkill * SKILL_CONSTANTS.MORE_CRITICALS_PERCENT * lvl(SKILL_IDS.MORE_CRITICALS)) / 100;
+    }
+    if (stats.criticalMultiplier !== 0 && stats.criticalMultiplier !== 1 && lvl(SKILL_IDS.BETTER_CRITICALS) > 0) {
+        stats.criticalMultiplier += (stats.criticalMultiplier * SKILL_CONSTANTS.BETTER_CRITICALS_PERCENT * lvl(SKILL_IDS.BETTER_CRITICALS)) / 100;
+    }
+    stats.maxAP += SKILL_CONSTANTS.SPEED * lvl(SKILL_IDS.SPEED);
+}
+
+// --- Active conditions, damage modifier, final assembly ---
+
+// ActorStatsController.java:248-252 (applyEffectsFromCurrentConditions).
+export function applyActiveConditions(stats, activeConditions, conditionsById) {
+    for (const { conditionId, magnitude } of activeConditions || []) {
+        const condition = conditionsById[conditionId];
+        if (!condition) {
+            debug(`Damage calculator: unknown condition id '${conditionId}' in build`);
+            continue;
+        }
+        if (condition.abilityEffect) {
+            applyAbilityEffects(stats, condition.abilityEffect, magnitude);
+        }
+    }
+}
+
+// ItemController.java:439-467 (applyDamageModifier). Rescales the *non-weapon*
+// portion of damage potential (i.e. everything except the main/off-hand weapon's
+// own increaseAttackDamage contribution, tracked in `weaponDamage`) by a weapon's
+// setNonWeaponDamageModifier percent.
+export function applyNonWeaponDamageModifier(stats, equipped, weaponDamage, skillLevels) {
+    const mainWeapon = equipped.weapon;
+    const offWeapon = isWeapon(equipped.shield) ? equipped.shield : null;
+
+    let modifier1 = -1;
+    let modifier2 = -1;
+    if (mainWeapon?.equipEffect?.setNonWeaponDamageModifier != null) {
+        modifier1 = mainWeapon.equipEffect.setNonWeaponDamageModifier;
+    }
+    if (offWeapon?.equipEffect?.setNonWeaponDamageModifier != null) {
+        modifier2 = offWeapon.equipEffect.setNonWeaponDamageModifier;
+    }
+
+    let modifier = 100;
+    if (modifier1 >= 0 && modifier2 >= 0) {
+        const fsLevel = skillLevels[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+        if (fsLevel === 2) modifier = Math.max(modifier1, modifier2);
+        else if (fsLevel === 1) modifier = Math.floor((modifier1 + modifier2) / 2);
+        else modifier = Math.min(modifier1, modifier2);
+    } else if (modifier1 <= 0 && modifier2 >= 0) {
+        modifier = modifier2;
+    } else if (modifier2 <= 0 && modifier1 >= 0) {
+        modifier = modifier1;
+    }
+
+    if (modifier !== 100) {
+        const minBaseDamage = stats.damagePotential.min - weaponDamage.min;
+        const maxBaseDamage = stats.damagePotential.max - weaponDamage.max;
+        stats.damagePotential.min += Math.round(minBaseDamage * ((modifier - 100) / 100));
+        stats.damagePotential.max += Math.round(maxBaseDamage * ((modifier - 100) / 100));
+    }
+}
+
+// Full player pipeline, ActorStatsController.recalculatePlayerStats (:275-296) order:
+// base traits -> equipment (incl. fighting styles/dual-wield) -> item proficiencies
+// -> general combat skills -> active conditions -> non-weapon damage modifier -> clamp.
+export function resolvePlayerStats(build, { itemsById, conditionsById }) {
+    const stats = buildBaseStats(build.level, build.levelUpChoices, build.skillLevels[SKILL_IDS.FORTITUDE] || 0);
+
+    const equipped = {};
+    for (const slot of EQUIP_SLOTS) {
+        const itemId = build.equipment[slot];
+        if (!itemId) {
+            equipped[slot] = null;
+            continue;
+        }
+        const item = itemsById[itemId];
+        if (!item) {
+            debug(`Damage calculator: unknown item id '${itemId}' in build (slot ${slot})`);
+        }
+        equipped[slot] = item || null;
+    }
+
+    const weaponDamage = applyEquipment(stats, equipped, build.skillLevels);
+    applyItemProficiencies(stats, equipped, build.skillLevels);
+    applyGeneralCombatSkills(stats, build.skillLevels);
+    applyActiveConditions(stats, build.activeConditions, conditionsById);
+    applyNonWeaponDamageModifier(stats, equipped, weaponDamage, build.skillLevels);
+    clampStats(stats);
+
+    return stats;
+}
+
+// Monsters never equip/level/skill - just static JSON fields plus conditions.
+// Monster.resetStatsToBaseTraits (Monster.java:50-66).
+export function resolveMonsterStats(monster, activeConditions, conditionsById) {
+    const stats = {
+        attackCost: monster.attackCost,
+        attackChance: monster.attackChance,
+        criticalSkill: monster.criticalSkill || 0,
+        criticalMultiplier: monster.criticalMultiplier || 0,
+        damagePotential: { min: monster.attackDamage?.min || 0, max: monster.attackDamage?.max || 0 },
+        blockChance: monster.blockChance || 0,
+        damageResistance: monster.damageResistance || 0,
+        maxHP: monster.maxHP,
+        maxAP: monster.maxAP,
+        isImmuneToCriticalHits: !!monster.isImmuneToCriticalHits,
+    };
+    applyActiveConditions(stats, activeConditions, conditionsById);
+    clampStats(stats);
+    return stats;
 }
