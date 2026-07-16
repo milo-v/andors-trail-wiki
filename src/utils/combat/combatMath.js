@@ -3,6 +3,9 @@
 // No RNG: every value here is a closed-form expected value, matching the game's
 // own implementation.
 
+import { resolvePlayerStats, resolveMonsterStats } from './statEngine';
+import { SKILL_IDS, SKILL_CONSTANTS } from './skillData';
+
 export function getAttacksPerTurn(stats) {
     return Math.floor(stats.maxAP / stats.attackCost);
 }
@@ -106,4 +109,54 @@ export function getDifficultyLabel(difficulty) {
     if (difficulty >= 20) return 'hard';
     if (difficulty === 0) return 'impossible';
     return 'veryhard';
+}
+
+// --- Derived metrics ---
+
+// Expected HP restored per round from conditions with a positive roundEffect
+// (e.g. a regeneration-style buff). fullRoundEffect ticks are rarer/slower and
+// intentionally excluded here — this is a per-turn estimate, not a full replay.
+function getExpectedConditionHPPerRound(activeConditions, conditionsById) {
+    let total = 0;
+    for (const { conditionId, magnitude } of activeConditions || []) {
+        const condition = conditionsById[conditionId];
+        const boost = condition?.roundEffect?.increaseCurrentHP;
+        if (!boost) continue;
+        const avg = ((boost.min || 0) + (boost.max || 0)) / 2;
+        total += avg * magnitude;
+    }
+    return total;
+}
+
+// Builds the full set of calculator outputs for one player build vs one monster.
+export function computeCombatSummary(build, monster, { itemsById, conditionsById }) {
+    const player = resolvePlayerStats(build, { itemsById, conditionsById });
+    const target = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+
+    const difficulty = getMonsterDifficulty(player, target);
+    const difficultyLabel = getDifficultyLabel(difficulty);
+
+    const damagePerTurn = getAverageDamagePerTurn(player, target);
+    const hpLossPerTurn = getAverageDamagePerTurn(target, player);
+    const turnsToKillMonster = getTurnsToKillTarget(player, target);
+
+    const regenPerTurn = getExpectedConditionHPPerRound(build.activeConditions, conditionsById);
+    const hpGainPerTurn = regenPerTurn;
+
+    const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
+
+    // Eater skill + any item killEffect HP restores are flat, deterministic
+    // per-kill bonuses (not expected values), per CombatController.playerKilledMonster.
+    const eaterLevel = build.skillLevels[SKILL_IDS.EATER] || 0;
+    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH;
+
+    return {
+        difficulty,
+        difficultyLabel,
+        damagePerTurn,
+        hpLossPerTurn,
+        hpGainPerTurn,
+        hpLossPerKill,
+        hpGainPerKill,
+    };
 }
