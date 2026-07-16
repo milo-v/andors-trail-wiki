@@ -3,6 +3,7 @@
 // full pipeline order and rationale.
 
 import { applyLevelUpChoices } from './levelModel';
+import { SKILL_IDS, SKILL_CONSTANTS, getProficiencySkillForCategory } from './skillData';
 
 export const EQUIP_SLOTS = ['weapon', 'shield', 'head', 'body', 'hand', 'feet', 'neck', 'leftring', 'rightring'];
 export const ARMOR_SLOTS = ['head', 'body', 'hand', 'feet'];
@@ -102,4 +103,142 @@ export function buildBaseStats(level, levelUpChoices, fortitudeSkillLevel) {
         useItemCost: traits.useItemCost,
         reequipCost: traits.reequipCost,
     };
+}
+
+// --- Fighting styles + dual-wield ---
+
+function applyDualWield(stats, mainHand, offHand, skillLevels) {
+    const fsLevel = skillLevels[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+    if (!offHand.equipEffect) return;
+
+    const attackCostMain = mainHand.equipEffect?.increaseAttackCost || 0;
+    const attackCostOff = offHand.equipEffect.increaseAttackCost || 0;
+    let percent;
+
+    if (fsLevel >= 2) {
+        percent = SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL2;
+        stats.attackCost = Math.max(attackCostMain, attackCostOff);
+    } else if (fsLevel === 1) {
+        percent = SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL1;
+        stats.attackCost =
+            Math.max(attackCostMain, attackCostOff) +
+            getPercentage(Math.min(attackCostMain, attackCostOff), SKILL_CONSTANTS.DUALWIELD_LEVEL1_OFFHAND_AP_COST_PERCENT, 0);
+    } else {
+        percent = SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL0;
+        stats.attackCost = attackCostMain + attackCostOff;
+    }
+
+    stats.criticalMultiplier = Math.max(
+        mainHand.equipEffect?.setCriticalMultiplier || 0,
+        getPercentage(offHand.equipEffect.setCriticalMultiplier || 0, percent, 0)
+    );
+
+    const offhandProfSkill = getProficiencySkillForCategory(offHand.categoryLink);
+    const offhandProfLevel = offhandProfSkill ? skillLevels[offhandProfSkill] || 0 : 0;
+    stats.attackChance += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_AC_PERCENT * offhandProfLevel, percent, 0);
+    stats.blockChance += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_BC_PERCENT * offhandProfLevel, percent, 0);
+    stats.criticalSkill += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_CS_PERCENT * offhandProfLevel, percent, 0);
+
+    const e = offHand.equipEffect;
+    stats.attackChance += getPercentage(e.increaseAttackChance || 0, percent, 100);
+    stats.blockChance += getPercentage(e.increaseBlockChance || 0, percent, 100);
+    if (e.increaseAttackDamage) {
+        stats.damagePotential.max += getPercentage(e.increaseAttackDamage.max || 0, percent, 100);
+        stats.damagePotential.min += getPercentage(e.increaseAttackDamage.min || 0, percent, 100);
+    }
+    stats.criticalSkill += getPercentage(e.increaseCriticalSkill || 0, percent, 100);
+    stats.maxHP += getPercentage(e.increaseMaxHP || 0, percent, 100);
+    stats.damageResistance += getPercentage(e.increaseDamageResistance || 0, percent, 100);
+    stats.maxAP += getPercentage(e.increaseMaxAP || 0, percent, 100);
+    // Reversed parameters: a positive value is a malus for these cost fields.
+    stats.moveCost += getPercentage(e.increaseMoveCost || 0, 100, percent);
+    stats.reequipCost += getPercentage(e.increaseReequipCost || 0, 100, percent);
+    stats.useItemCost += getPercentage(e.increaseUseItemCost || 0, 100, percent);
+}
+
+function applyFightingStyles(stats, equipped, skillLevels) {
+    const lvl = (id) => skillLevels[id] || 0;
+    const mainHand = equipped.weapon;
+    const offHand = equipped.shield;
+
+    if (lvl(SKILL_IDS.FIGHTSTYLE_UNARMED_UNARMORED) > 0 && isUnarmored(equipped) && !mainHand && !offHand) {
+        const level = lvl(SKILL_IDS.FIGHTSTYLE_UNARMED_UNARMORED);
+        stats.blockChance += SKILL_CONSTANTS.UNARMED_UNARMORED_BC * level;
+        stats.damageResistance += SKILL_CONSTANTS.UNARMED_UNARMORED_DR * level;
+        stats.attackChance += SKILL_CONSTANTS.UNARMED_UNARMORED_AC * level;
+        stats.damagePotential.max += SKILL_CONSTANTS.UNARMED_UNARMORED_DMG_MAX * level;
+        stats.criticalMultiplier = 1 + (SKILL_CONSTANTS.UNARMED_UNARMORED_CM_PERCENT / 100) * level;
+    }
+
+    if (isWielding2Hand(mainHand, offHand)) {
+        const fs = lvl(SKILL_IDS.FIGHTSTYLE_2HAND);
+        const spec = lvl(SKILL_IDS.SPECIALIZATION_2HAND);
+        const dmg = mainHand.equipEffect?.increaseAttackDamage || { min: 0, max: 0 };
+        stats.damagePotential.max += getPercentage(dmg.max, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        stats.damagePotential.min += getPercentage(dmg.min, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        stats.damagePotential.max += getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        stats.damagePotential.min += getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_AC_PERCENT, 0);
+    }
+
+    if (isWieldingWeaponAndShield(mainHand, offHand)) {
+        const fs = lvl(SKILL_IDS.FIGHTSTYLE_WEAPON_SHIELD);
+        const spec = lvl(SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD);
+        stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, fs * SKILL_CONSTANTS.FIGHTSTYLE_WEAPON_AC_PERCENT, 0);
+        stats.blockChance += getPercentage(offHand.equipEffect?.increaseBlockChance || 0, fs * SKILL_CONSTANTS.FIGHTSTYLE_SHIELD_BC_PERCENT, 0);
+        stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_AC_PERCENT, 0);
+        const dmg = mainHand.equipEffect?.increaseAttackDamage || { min: 0, max: 0 };
+        stats.damagePotential.max += getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
+        stats.damagePotential.min += getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
+    }
+
+    if (isDualWielding(mainHand, offHand)) {
+        applyDualWield(stats, mainHand, offHand, skillLevels);
+        const specLevel = lvl(SKILL_IDS.SPECIALIZATION_DUAL_WIELD);
+        if (specLevel > 0) {
+            stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_DUALWIELD_AC_PERCENT, 0);
+            stats.blockChance += getPercentage(mainHand.equipEffect?.increaseBlockChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_DUALWIELD_BC_PERCENT, 0);
+            stats.attackChance += getPercentage(offHand.equipEffect?.increaseAttackChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_DUALWIELD_AC_PERCENT, 0);
+            stats.blockChance += getPercentage(offHand.equipEffect?.increaseBlockChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_DUALWIELD_BC_PERCENT, 0);
+        }
+    }
+}
+
+// ItemController.java:152-194 order: weapon 100% -> shield 100% (skipped if
+// dual-wielding) -> fighting styles -> remaining armor slots 100%.
+// Returns the weapon-damage tracker needed by Task 7's non-weapon damage modifier.
+export function applyEquipment(stats, equipped, skillLevels) {
+    const mainHand = equipped.weapon;
+    const offHand = equipped.shield;
+    const weaponDamage = { min: 0, max: 0 };
+
+    stats.attackCost = 0;
+    if (mainHand?.equipEffect) {
+        stats.criticalMultiplier = mainHand.equipEffect.setCriticalMultiplier || stats.criticalMultiplier;
+    }
+    if (mainHand?.equipEffect) {
+        applyAbilityEffects(stats, mainHand.equipEffect, 1);
+        if (isWeapon(mainHand) && mainHand.equipEffect.increaseAttackDamage) {
+            weaponDamage.min += mainHand.equipEffect.increaseAttackDamage.min || 0;
+            weaponDamage.max += mainHand.equipEffect.increaseAttackDamage.max || 0;
+        }
+    }
+
+    const dualWielding = isDualWielding(mainHand, offHand);
+    if (!dualWielding && offHand?.equipEffect) {
+        applyAbilityEffects(stats, offHand.equipEffect, 1);
+        if (isWeapon(offHand) && offHand.equipEffect.increaseAttackDamage) {
+            weaponDamage.min += offHand.equipEffect.increaseAttackDamage.min || 0;
+            weaponDamage.max += offHand.equipEffect.increaseAttackDamage.max || 0;
+        }
+    }
+
+    applyFightingStyles(stats, equipped, skillLevels);
+
+    for (const slot of [...ARMOR_SLOTS, 'neck', 'leftring', 'rightring']) {
+        const item = equipped[slot];
+        if (item?.equipEffect) applyAbilityEffects(stats, item.equipEffect, 1);
+    }
+
+    return weaponDamage;
 }
