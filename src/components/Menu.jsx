@@ -20,6 +20,7 @@ export default class Main extends React.Component {
                     {LiLink("conditions")}
                     {LiLink("quests")}
                     {LiLink("categories")}
+                    {LiLink("calculator")}
                     {LiLink("map")}
                     {LiLink("wayfinder")}
                 </ul>
