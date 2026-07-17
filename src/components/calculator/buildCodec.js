@@ -1,6 +1,6 @@
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
-import { SKILL_META } from '../../utils/combat/skillData';
-import { createEmptyBuild, reconcileLevelUpChoices, reconcileSkillLevels } from './buildHelpers';
+import { SKILL_IDS, SKILL_META } from '../../utils/combat/skillData';
+import { createEmptyBuild, reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels } from './buildHelpers';
 
 export function encodeBuildToQuery(build, opponentId) {
     const json = JSON.stringify({ build, opponentId });
@@ -48,6 +48,9 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
             }
         }
     }
+    if (Array.isArray(src.fortitudeLevels)) {
+        build.fortitudeLevels = src.fortitudeLevels.filter(n => typeof n === 'number' && n >= 1);
+    }
     if (src.equipment) {
         for (const slot of EQUIP_SLOTS) {
             const itemId = src.equipment[slot];
@@ -64,6 +67,10 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
 
     build.levelUpChoices = reconcileLevelUpChoices(build.level, build.levelUpChoices);
     build.skillLevels = reconcileSkillLevels(build.level, build.skillLevels);
+    build.fortitudeLevels = reconcileFortitudeLevels(build.level, build.fortitudeLevels, build.skillLevels);
+    if (build.fortitudeLevels.length !== (build.skillLevels[SKILL_IDS.FORTITUDE] || 0)) {
+        build.skillLevels = { ...build.skillLevels, [SKILL_IDS.FORTITUDE]: build.fortitudeLevels.length };
+    }
 
     const opponentId = monsterIds.has(payload.opponentId) ? payload.opponentId : null;
 

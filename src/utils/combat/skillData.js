@@ -174,3 +174,90 @@ export const SKILL_META = {
     [SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Weapon and shield' },
     [SKILL_IDS.SPECIALIZATION_DUAL_WIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Dual wield' },
 };
+
+// Level-gating requirements, ported from SkillCollection.java:initialize()'s
+// SkillLevelRequirement arrays. Fortitude is handled separately (its HP bonus is
+// acquisition-order-dependent - see buildHelpers.js's fortitude helpers and
+// levelModel.js's applyLevelUpChoices) and has no entry here. Weapon/armor
+// proficiencies only have the quest-gated-first-level rule (already handled in
+// buildHelpers.js's getSkillPointsSpent) and have no other levelupRequirements in
+// the game source.
+export const LEVELUP_REQUIREMENTS = {
+    [SKILL_IDS.BARK_SKIN]: [
+        { type: 'experienceLevel', every: 10, initial: 0 },
+        { type: 'stat', stat: 'blockChance', every: 15, initial: 0 },
+    ],
+    [SKILL_IDS.BETTER_CRITICALS]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.MORE_CRITICALS, every: 1, initial: 0 },
+    ],
+    [SKILL_IDS.SPEED]: [
+        { type: 'experienceLevel', every: 15, initial: 0 },
+    ],
+    [SKILL_IDS.EATER]: [
+        { type: 'stat', stat: 'maxHP', every: 20, initial: 20 },
+    ],
+    [SKILL_IDS.CLEAVE]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.WEAPON_CHANCE, every: 1, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.WEAPON_DMG, every: 1, initial: 0 },
+    ],
+    [SKILL_IDS.FIGHTSTYLE_DUAL_WIELD]: [{ type: 'experienceLevel', every: 15, initial: 0 }],
+    [SKILL_IDS.FIGHTSTYLE_2HAND]: [{ type: 'experienceLevel', every: 15, initial: 0 }],
+    [SKILL_IDS.FIGHTSTYLE_WEAPON_SHIELD]: [{ type: 'experienceLevel', every: 15, initial: 0 }],
+    [SKILL_IDS.FIGHTSTYLE_UNARMED_UNARMORED]: [{ type: 'experienceLevel', every: 15, initial: 0 }],
+    [SKILL_IDS.SPECIALIZATION_DUAL_WIELD]: [
+        { type: 'experienceLevel', every: 45, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.FIGHTSTYLE_DUAL_WIELD, every: 2, initial: 0 },
+    ],
+    [SKILL_IDS.SPECIALIZATION_2HAND]: [
+        { type: 'experienceLevel', every: 45, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.FIGHTSTYLE_2HAND, every: 2, initial: 0 },
+    ],
+    [SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD]: [
+        { type: 'experienceLevel', every: 45, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.FIGHTSTYLE_WEAPON_SHIELD, every: 2, initial: 0 },
+    ],
+};
+
+// Ported from SkillInfo.canLevelUpSkillTo / SkillLevelRequirement.isSatisfiedByPlayer.
+// resolvedStats may be null while the build's level-up choices aren't fully
+// allocated yet (resolvePlayerStats throws until levelUpChoices sums correctly) -
+// 'stat' requirements are treated as satisfied in that case, since they can't be
+// evaluated yet; 'experienceLevel'/'otherSkill' checks don't need resolvedStats and
+// are always evaluated.
+export function canLevelUpSkillTo(skillId, requestedLevel, { level, skillLevels, resolvedStats }) {
+    const requirements = LEVELUP_REQUIREMENTS[skillId];
+    if (!requirements) return true;
+
+    return requirements.every(req => {
+        const requiredValue = requestedLevel * req.every + req.initial;
+        if (req.type === 'experienceLevel') return level >= requiredValue;
+        if (req.type === 'otherSkill') return (skillLevels[req.skillId] || 0) >= requiredValue;
+        if (req.type === 'stat') {
+            if (!resolvedStats) return true;
+            return resolvedStats[req.stat] >= requiredValue;
+        }
+        return true;
+    });
+}
+
+const STAT_REQUIREMENT_LABELS = { maxHP: 'Max HP', blockChance: 'Block Chance' };
+
+// Human-readable description of the first unmet requirement, for a disabled "+"
+// button's title attribute. Returns null if the level-up is allowed.
+export function describeUnmetRequirement(skillId, requestedLevel, ctx) {
+    const requirements = LEVELUP_REQUIREMENTS[skillId];
+    if (!requirements) return null;
+    for (const req of requirements) {
+        const requiredValue = requestedLevel * req.every + req.initial;
+        if (req.type === 'experienceLevel' && ctx.level < requiredValue) {
+            return `Requires character level ${requiredValue}`;
+        }
+        if (req.type === 'otherSkill' && (ctx.skillLevels[req.skillId] || 0) < requiredValue) {
+            return `Requires ${SKILL_META[req.skillId].name} level ${requiredValue}`;
+        }
+        if (req.type === 'stat' && ctx.resolvedStats && ctx.resolvedStats[req.stat] < requiredValue) {
+            return `Requires ${STAT_REQUIREMENT_LABELS[req.stat] || req.stat} of ${requiredValue}`;
+        }
+    }
+    return null;
+}

@@ -46,14 +46,13 @@ export function getRequiredExperience(level) {
 }
 
 // Builds level-1 base traits, then applies `(level - 1)` user-chosen level-up
-// bonuses plus the fortitude skill's retroactive HP bonus.
-//
-// Simplification (documented in the design spec): the real game applies the
-// fortitude bonus incrementally at each level-up event using whatever fortitude
-// skill level was active *then*. Here we assume the final chosen fortitude level
-// was active for every level-up, which is the natural reading of "build a
-// level-N character with these skills."
-export function applyLevelUpChoices(level, levelUpChoices, fortitudeSkillLevel) {
+// bonuses. Fortitude's HP bonus is applied per-point, matching the real game's
+// ActorStatsController.addLevelupEffect: each level-up event adds the fortitude
+// skill level *active at that moment*, so a point acquired at player level L
+// contributes 1 HP to every level-up from L+1 through the build's final level -
+// i.e. `finalLevel - L` HP per point, NOT `fortitudeLevel * (finalLevel - 1)`
+// (that formula would assume every point was acquired at level 1, the max-HP case).
+export function applyLevelUpChoices(level, levelUpChoices, fortitudeLevels) {
     const numChoices = level - 1;
     const chosen =
         (levelUpChoices.health || 0) +
@@ -74,7 +73,10 @@ export function applyLevelUpChoices(level, levelUpChoices, fortitudeSkillLevel) 
     traits.damagePotential.min += (levelUpChoices.attackDamage || 0) * LEVELUP_EFFECT.attackDamage;
     traits.damagePotential.max += (levelUpChoices.attackDamage || 0) * LEVELUP_EFFECT.attackDamage;
     traits.blockChance += (levelUpChoices.blockChance || 0) * LEVELUP_EFFECT.blockChance;
-    traits.maxHP += (fortitudeSkillLevel || 0) * PER_SKILLPOINT_INCREASE_FORTITUDE_HEALTH * numChoices;
+    traits.maxHP += (fortitudeLevels || []).reduce(
+        (sum, acquiredAt) => sum + PER_SKILLPOINT_INCREASE_FORTITUDE_HEALTH * (level - acquiredAt),
+        0
+    );
 
     return traits;
 }

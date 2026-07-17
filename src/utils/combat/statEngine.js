@@ -87,8 +87,8 @@ export function clampStats(stats) {
 // Builds an empty ResolvedStats-plus-cost-fields object from level-1-plus-level-up
 // base traits (Task 1's levelModel), ready for equipment/skills/conditions to be
 // layered on top of.
-export function buildBaseStats(level, levelUpChoices, fortitudeSkillLevel) {
-    const traits = applyLevelUpChoices(level, levelUpChoices, fortitudeSkillLevel);
+export function buildBaseStats(level, levelUpChoices, fortitudeLevels) {
+    const traits = applyLevelUpChoices(level, levelUpChoices, fortitudeLevels);
     return {
         attackCost: traits.attackCost,
         attackChance: traits.attackChance,
@@ -213,7 +213,14 @@ export function applyEquipment(stats, equipped, skillLevels) {
     const offHand = equipped.shield;
     const weaponDamage = { min: 0, max: 0 };
 
-    stats.attackCost = 0;
+    // ItemController.getMainWeapon(): falls back to the shield slot only if it
+    // holds a weapon (dual-wield). attackCost is only reset when a weapon is
+    // actually wielded - unarmed builds keep the base-trait attackCost (fists),
+    // otherwise getAttacksPerTurn() would divide by zero.
+    const hasMainWeapon = isWeapon(mainHand) || isWeapon(offHand);
+    if (hasMainWeapon) {
+        stats.attackCost = 0;
+    }
     if (mainHand?.equipEffect) {
         stats.criticalMultiplier = mainHand.equipEffect.setCriticalMultiplier || stats.criticalMultiplier;
     }
@@ -375,7 +382,7 @@ export function applyNonWeaponDamageModifier(stats, equipped, weaponDamage, skil
 // base traits -> equipment (incl. fighting styles/dual-wield) -> item proficiencies
 // -> general combat skills -> active conditions -> non-weapon damage modifier -> clamp.
 export function resolvePlayerStats(build, { itemsById, conditionsById }) {
-    const stats = buildBaseStats(build.level, build.levelUpChoices, build.skillLevels[SKILL_IDS.FORTITUDE] || 0);
+    const stats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
 
     const equipped = {};
     for (const slot of EQUIP_SLOTS) {
