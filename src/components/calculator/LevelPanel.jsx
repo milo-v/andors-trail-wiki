@@ -30,6 +30,7 @@ export default function LevelPanel({ level, levelUpChoices, onChangeLevel, onCha
                     min={1}
                     value={level}
                     onChange={e => onChangeLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    style={{ background: '#1a1a1a', color: 'white', border: '1px solid #666', padding: '2px 4px' }}
                 />
             </label>
             <div>Level-up bonuses ({remaining} of {numChoices} remaining)</div>

@@ -48,19 +48,23 @@ export default class SearchableSelect extends Component {
                     value={this.state.isOpen ? this.state.query : (selected ? selected.label : '')}
                     onFocus={() => this.setState({ isOpen: true, query: '' })}
                     onChange={e => this.setState({ query: e.target.value })}
-                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    style={{
+                        width: '100%', boxSizing: 'border-box', background: '#1a1a1a', color: 'white',
+                        border: '1px solid #666', padding: '4px 6px',
+                    }}
                 />
                 {this.props.allowClear && selected && (
-                    <button type="button" onClick={() => this.handleSelect(null)} style={{ marginLeft: 4 }}>×</button>
+                    <button type="button" onClick={() => this.handleSelect(null)}
+                        style={{ marginLeft: 4, background: '#1a1a1a', color: 'white', border: '1px solid #666' }}>×</button>
                 )}
                 {this.state.isOpen && (
                     <ul style={{
-                        position: 'absolute', zIndex: 10, background: 'white', border: '1px solid #ccc',
+                        position: 'absolute', zIndex: 10, background: '#1a1a1a', border: '1px solid #666',
                         listStyle: 'none', margin: 0, padding: 0, maxHeight: 240, overflowY: 'auto', width: '100%',
                     }}>
                         {filtered.map(o => (
                             <li key={o.value} onMouseDown={() => this.handleSelect(o.value)}
-                                style={{ padding: '4px 8px', cursor: 'pointer' }}>
+                                style={{ padding: '4px 8px', cursor: 'pointer', color: 'white' }}>
                                 {o.label}
                             </li>
                         ))}

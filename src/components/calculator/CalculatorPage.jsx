@@ -5,13 +5,16 @@ import SkillsPanel from './SkillsPanel';
 import ConditionsPanel from './ConditionsPanel';
 import OpponentPicker from './OpponentPicker';
 import ResultsPanel from './ResultsPanel';
+import PlayerStatsPanel from './PlayerStatsPanel';
 import { encodeBuildToQuery, decodeBuildFromQuery } from './buildCodec';
 import {
     createEmptyBuild, getLevelUpChoicesSum, getSkillPointsSpent,
-    reconcileLevelUpChoices, reconcileSkillLevels,
+    reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels,
 } from './buildHelpers';
 import { computeCombatSummary } from '../../utils/combat/combatMath';
+import { resolvePlayerStats } from '../../utils/combat/statEngine';
 import { getSkillPointBudget } from '../../utils/combat/levelModel';
+import { SKILL_IDS } from '../../utils/combat/skillData';
 
 export default class CalculatorPage extends Component {
     constructor(props) {
@@ -39,8 +42,12 @@ export default class CalculatorPage extends Component {
 
     handleLevelChange(level) {
         const levelUpChoices = reconcileLevelUpChoices(level, this.state.build.levelUpChoices);
-        const skillLevels = reconcileSkillLevels(level, this.state.build.skillLevels);
-        this.updateBuild({ level, levelUpChoices, skillLevels });
+        let skillLevels = reconcileSkillLevels(level, this.state.build.skillLevels);
+        const fortitudeLevels = reconcileFortitudeLevels(level, this.state.build.fortitudeLevels, skillLevels);
+        if (fortitudeLevels.length !== (skillLevels[SKILL_IDS.FORTITUDE] || 0)) {
+            skillLevels = { ...skillLevels, [SKILL_IDS.FORTITUDE]: fortitudeLevels.length };
+        }
+        this.updateBuild({ level, levelUpChoices, skillLevels, fortitudeLevels });
     }
 
     setOpponentId(opponentId) {
@@ -52,6 +59,17 @@ export default class CalculatorPage extends Component {
         this.props.history.replace({ pathname: '/calculator', search: query });
     }
 
+    getResolvedPlayerStats() {
+        try {
+            return resolvePlayerStats(this.state.build, {
+                itemsById: this.getItemsById(),
+                conditionsById: this.getConditionsById(),
+            });
+        } catch (e) {
+            return null; // levelUpChoices not fully allocated yet - can't resolve stats
+        }
+    }
+
     render() {
         const { build, opponentId } = this.state;
         const monster = this.props.monsters.find(m => m.id === opponentId) || null;
@@ -61,8 +79,10 @@ export default class CalculatorPage extends Component {
         const fullyAllocated = levelUpChoicesSum === Math.max(0, build.level - 1)
             && skillPointsSpent === getSkillPointBudget(build.level);
 
+        const resolvedStats = this.getResolvedPlayerStats();
+
         let summary = null;
-        if (monster && fullyAllocated) {
+        if (monster && fullyAllocated && resolvedStats) {
             summary = computeCombatSummary(build, monster, {
                 itemsById: this.getItemsById(),
                 conditionsById: this.getConditionsById(),
@@ -72,33 +92,45 @@ export default class CalculatorPage extends Component {
         return (
             <div style={{ padding: 10 }}>
                 <h2>Damage Calculator</h2>
-                <LevelPanel
-                    level={build.level}
-                    levelUpChoices={build.levelUpChoices}
-                    onChangeLevel={level => this.handleLevelChange(level)}
-                    onChangeLevelUpChoices={levelUpChoices => this.updateBuild({ levelUpChoices })}
-                />
-                <EquipmentPanel
-                    equipment={build.equipment}
-                    items={this.props.items}
-                    onChange={equipment => this.updateBuild({ equipment })}
-                />
-                <SkillsPanel
-                    level={build.level}
-                    skillLevels={build.skillLevels}
-                    onChange={skillLevels => this.updateBuild({ skillLevels })}
-                />
-                <ConditionsPanel
-                    activeConditions={build.activeConditions}
-                    conditions={this.props.conditions}
-                    onChange={activeConditions => this.updateBuild({ activeConditions })}
-                />
-                <OpponentPicker
-                    opponentId={opponentId}
-                    monsters={this.props.monsters}
-                    onChange={id => this.setOpponentId(id)}
-                />
-                <ResultsPanel summary={summary} opponentSelected={!!monster} pointsFullyAllocated={fullyAllocated}/>
+                <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '2 1 480px', minWidth: 320 }}>
+                        <LevelPanel
+                            level={build.level}
+                            levelUpChoices={build.levelUpChoices}
+                            onChangeLevel={level => this.handleLevelChange(level)}
+                            onChangeLevelUpChoices={levelUpChoices => this.updateBuild({ levelUpChoices })}
+                        />
+                        <EquipmentPanel
+                            equipment={build.equipment}
+                            items={this.props.items}
+                            onChange={equipment => this.updateBuild({ equipment })}
+                        />
+                        <SkillsPanel
+                            level={build.level}
+                            skillLevels={build.skillLevels}
+                            fortitudeLevels={build.fortitudeLevels}
+                            resolvedStats={resolvedStats}
+                            onChange={skillLevels => this.updateBuild({ skillLevels })}
+                            onChangeFortitude={patch => this.updateBuild(patch)}
+                        />
+                        <ConditionsPanel
+                            activeConditions={build.activeConditions}
+                            conditions={this.props.conditions}
+                            onChange={activeConditions => this.updateBuild({ activeConditions })}
+                        />
+                    </div>
+                    <div style={{ flex: '1 1 280px', minWidth: 260 }}>
+                        <PlayerStatsPanel resolvedStats={resolvedStats} fullyAllocated={fullyAllocated} />
+                    </div>
+                    <div style={{ flex: '1 1 300px', minWidth: 280 }}>
+                        <OpponentPicker
+                            opponentId={opponentId}
+                            monsters={this.props.monsters}
+                            onChange={id => this.setOpponentId(id)}
+                        />
+                        <ResultsPanel summary={summary} opponentSelected={!!monster} pointsFullyAllocated={fullyAllocated}/>
+                    </div>
+                </div>
             </div>
         );
     }
