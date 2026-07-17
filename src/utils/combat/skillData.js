@@ -126,3 +126,51 @@ export function getProficiencySkillForCategory(categoryLink) {
     }
     return null;
 }
+
+// Category groupings + max skill level per skill, for UI display. Not needed by
+// the combat math itself (statEngine.js only reads skill *levels*, never caps
+// them) — this is Phase B's data, transcribed here since skillData.js is already
+// this repo's designated home for hand-transcribed skill data.
+// Max levels from SkillCollection.java:151-243 (initializeSkill calls);
+// MAXLEVEL_NONE (-1) -> null (no cap beyond the skill point budget).
+// Display names from public/values/strings.xml's skill_title_* keys.
+export const SKILL_CATEGORY = {
+    GENERAL: 'general',
+    WEAPON_PROFICIENCY: 'weaponProficiency',
+    ARMOR_PROFICIENCY: 'armorProficiency',
+    FIGHTSTYLE: 'fightstyle',
+};
+
+export const SKILL_META = {
+    [SKILL_IDS.WEAPON_CHANCE]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Weapon Accuracy' },
+    [SKILL_IDS.WEAPON_DMG]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Hard Hit' },
+    [SKILL_IDS.DODGE]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Dodge' },
+    [SKILL_IDS.BARK_SKIN]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 5, name: 'Bark Skin' },
+    [SKILL_IDS.MORE_CRITICALS]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'More Criticals' },
+    [SKILL_IDS.BETTER_CRITICALS]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Better Criticals' },
+    [SKILL_IDS.SPEED]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 2, name: 'Combat Speed' },
+    [SKILL_IDS.FORTITUDE]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Increased Fortitude' },
+    [SKILL_IDS.EATER]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Corpse Eater' },
+    [SKILL_IDS.CLEAVE]: { category: SKILL_CATEGORY.GENERAL, maxLevel: null, name: 'Cleave' },
+
+    [SKILL_IDS.WEAPON_PROF_DAGGER]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Dagger proficiency' },
+    [SKILL_IDS.WEAPON_PROF_1HSWORD]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'One-handed sword proficiency' },
+    [SKILL_IDS.WEAPON_PROF_2HSWORD]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Two-handed sword proficiency' },
+    [SKILL_IDS.WEAPON_PROF_AXE]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Axe proficiency' },
+    [SKILL_IDS.WEAPON_PROF_BLUNT]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Blunt weapon proficiency' },
+    [SKILL_IDS.WEAPON_PROF_POLE]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Pole weapon proficiency' },
+    [SKILL_IDS.WEAPON_PROF_UNARMED]: { category: SKILL_CATEGORY.WEAPON_PROFICIENCY, maxLevel: 3, name: 'Unarmed fighting' },
+
+    [SKILL_IDS.ARMOR_PROF_SHIELD]: { category: SKILL_CATEGORY.ARMOR_PROFICIENCY, maxLevel: 2, name: 'Shield proficiency' },
+    [SKILL_IDS.ARMOR_PROF_LIGHT]: { category: SKILL_CATEGORY.ARMOR_PROFICIENCY, maxLevel: 3, name: 'Light armor proficiency' },
+    [SKILL_IDS.ARMOR_PROF_HEAVY]: { category: SKILL_CATEGORY.ARMOR_PROFICIENCY, maxLevel: 4, name: 'Heavy armor proficiency' },
+    [SKILL_IDS.ARMOR_PROF_UNARMORED]: { category: SKILL_CATEGORY.ARMOR_PROFICIENCY, maxLevel: 3, name: 'Unarmored fighting' },
+
+    [SKILL_IDS.FIGHTSTYLE_UNARMED_UNARMORED]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 3, name: 'Fighting style: Way of the monk' },
+    [SKILL_IDS.FIGHTSTYLE_2HAND]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 2, name: 'Fighting style: Two-handed weapon' },
+    [SKILL_IDS.FIGHTSTYLE_WEAPON_SHIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 2, name: 'Fighting style: Weapon and shield' },
+    [SKILL_IDS.FIGHTSTYLE_DUAL_WIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 2, name: 'Fighting style: Dual wield' },
+    [SKILL_IDS.SPECIALIZATION_2HAND]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Two-handed weapon' },
+    [SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Weapon and shield' },
+    [SKILL_IDS.SPECIALIZATION_DUAL_WIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Dual wield' },
+};
