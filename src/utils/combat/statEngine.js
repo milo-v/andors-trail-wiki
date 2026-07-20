@@ -434,7 +434,7 @@ export function resolveMonsterStats(monster, activeConditions, conditionsById) {
         blockChance: monster.blockChance || 0,
         damageResistance: monster.damageResistance || 0,
         maxHP: monster.maxHP,
-        maxAP: monster.maxAP,
+        maxAP: monster.maxAP ?? 10,
         isImmuneToCriticalHits: !!monster.isImmuneToCriticalHits,
     };
     applyActiveConditions(stats, activeConditions, conditionsById);
