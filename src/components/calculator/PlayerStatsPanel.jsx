@@ -17,7 +17,7 @@ export default function PlayerStatsPanel({ resolvedStats, fullyAllocated }) {
         return (
             <div>
                 <h3>Player Stats</h3>
-                <p>Allocate all remaining level-up and skill points to see stats.</p>
+                <p>Allocate all remaining level-up points to see stats.</p>
             </div>
         );
     }

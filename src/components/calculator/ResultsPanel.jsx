@@ -51,7 +51,7 @@ export default function ResultsPanel({ summary, opponentSelected, pointsFullyAll
         return (
             <div>
                 <h3>Results</h3>
-                <p>Allocate all remaining level-up and skill points to see combat results.</p>
+                <p>Allocate all remaining level-up points to see combat results.</p>
                 <FormulaNotes />
             </div>
         );
