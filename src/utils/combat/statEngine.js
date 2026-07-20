@@ -108,7 +108,7 @@ export function buildBaseStats(level, levelUpChoices, fortitudeLevels) {
 
 // --- Fighting styles + dual-wield ---
 
-function applyDualWield(stats, mainHand, offHand, skillLevels) {
+function applyDualWield(stats, mainHand, offHand, skillLevels, weaponDamage) {
     const fsLevel = skillLevels[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
     if (!offHand.equipEffect) return;
 
@@ -144,8 +144,12 @@ function applyDualWield(stats, mainHand, offHand, skillLevels) {
     stats.attackChance += getPercentage(e.increaseAttackChance || 0, percent, 100);
     stats.blockChance += getPercentage(e.increaseBlockChance || 0, percent, 100);
     if (e.increaseAttackDamage) {
-        stats.damagePotential.max += getPercentage(e.increaseAttackDamage.max || 0, percent, 100);
-        stats.damagePotential.min += getPercentage(e.increaseAttackDamage.min || 0, percent, 100);
+        const dmgMax = getPercentage(e.increaseAttackDamage.max || 0, percent, 100);
+        const dmgMin = getPercentage(e.increaseAttackDamage.min || 0, percent, 100);
+        stats.damagePotential.max += dmgMax;
+        stats.damagePotential.min += dmgMin;
+        weaponDamage.max += dmgMax;
+        weaponDamage.min += dmgMin;
     }
     stats.criticalSkill += getPercentage(e.increaseCriticalSkill || 0, percent, 100);
     stats.maxHP += getPercentage(e.increaseMaxHP || 0, percent, 100);
@@ -157,7 +161,7 @@ function applyDualWield(stats, mainHand, offHand, skillLevels) {
     stats.useItemCost += getPercentage(e.increaseUseItemCost || 0, 100, percent);
 }
 
-function applyFightingStyles(stats, equipped, skillLevels) {
+function applyFightingStyles(stats, equipped, skillLevels, weaponDamage) {
     const lvl = (id) => skillLevels[id] || 0;
     const mainHand = equipped.weapon;
     const offHand = equipped.shield;
@@ -175,10 +179,16 @@ function applyFightingStyles(stats, equipped, skillLevels) {
         const fs = lvl(SKILL_IDS.FIGHTSTYLE_2HAND);
         const spec = lvl(SKILL_IDS.SPECIALIZATION_2HAND);
         const dmg = mainHand.equipEffect?.increaseAttackDamage || { min: 0, max: 0 };
-        stats.damagePotential.max += getPercentage(dmg.max, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
-        stats.damagePotential.min += getPercentage(dmg.min, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
-        stats.damagePotential.max += getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
-        stats.damagePotential.min += getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        const fsMax = getPercentage(dmg.max, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        const fsMin = getPercentage(dmg.min, fs * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        const specMax = getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        const specMin = getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        stats.damagePotential.max += fsMax;
+        stats.damagePotential.min += fsMin;
+        stats.damagePotential.max += specMax;
+        stats.damagePotential.min += specMin;
+        weaponDamage.max += fsMax + specMax;
+        weaponDamage.min += fsMin + specMin;
         stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, spec * SKILL_CONSTANTS.SPECIALIZATION_2HAND_AC_PERCENT, 0);
     }
 
@@ -189,12 +199,16 @@ function applyFightingStyles(stats, equipped, skillLevels) {
         stats.blockChance += getPercentage(offHand.equipEffect?.increaseBlockChance || 0, fs * SKILL_CONSTANTS.FIGHTSTYLE_SHIELD_BC_PERCENT, 0);
         stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_AC_PERCENT, 0);
         const dmg = mainHand.equipEffect?.increaseAttackDamage || { min: 0, max: 0 };
-        stats.damagePotential.max += getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
-        stats.damagePotential.min += getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
+        const specMax = getPercentage(dmg.max, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
+        const specMin = getPercentage(dmg.min, spec * SKILL_CONSTANTS.SPECIALIZATION_WEAPON_DMG_PERCENT, 0);
+        stats.damagePotential.max += specMax;
+        stats.damagePotential.min += specMin;
+        weaponDamage.max += specMax;
+        weaponDamage.min += specMin;
     }
 
     if (isDualWielding(mainHand, offHand)) {
-        applyDualWield(stats, mainHand, offHand, skillLevels);
+        applyDualWield(stats, mainHand, offHand, skillLevels, weaponDamage);
         const specLevel = lvl(SKILL_IDS.SPECIALIZATION_DUAL_WIELD);
         if (specLevel > 0) {
             stats.attackChance += getPercentage(mainHand.equipEffect?.increaseAttackChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_DUALWIELD_AC_PERCENT, 0);
@@ -241,7 +255,7 @@ export function applyEquipment(stats, equipped, skillLevels) {
         }
     }
 
-    applyFightingStyles(stats, equipped, skillLevels);
+    applyFightingStyles(stats, equipped, skillLevels, weaponDamage);
 
     for (const slot of [...ARMOR_SLOTS, 'neck', 'leftring', 'rightring']) {
         const item = equipped[slot];

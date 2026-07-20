@@ -39,6 +39,11 @@ export function getItemsForSlot(slot, items) {
             return cl.inventorySlot === 'weapon' && (cl.size === 'light' || cl.size === 'std');
         });
     }
+    // Game data only defines a single "leftring" category for all rings
+    // (see itemcategories_1.json) -- both ring slots draw from it.
+    if (slot === 'rightring') {
+        return items.filter(item => item.categoryLink?.inventorySlot === 'leftring');
+    }
     return items.filter(item => item.categoryLink?.inventorySlot === slot);
 }
 
