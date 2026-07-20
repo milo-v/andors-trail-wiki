@@ -158,6 +158,10 @@ throwaway verification script, confirm, then delete it — no permanent test fil
 4. **Phase D — Brute-force optimizer.** Prune via Phase C's Pareto frontier, search
    combinations against Phase A's real math, filter by user constraints. Depends on
    Phase B (UI for constraints) and Phase C (pruning).
+   - **Note (2026-07-20, not yet designed):** add an "item level" filter — a concept
+     that doesn't exist in the game itself, to be derived from general availability
+     based on game progression (e.g. where/when an item is reachable). Revisit and
+     design this later, before/during Phase D planning.
 
 Each phase gets its own brainstorm → spec (`docs/superpowers/specs/`) → plan →
 implementation cycle.
