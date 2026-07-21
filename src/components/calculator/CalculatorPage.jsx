@@ -12,7 +12,7 @@ import {
     reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels,
 } from './buildHelpers';
 import { computeCombatSummary } from '../../utils/combat/combatMath';
-import { resolvePlayerStats } from '../../utils/combat/statEngine';
+import { resolvePlayerStats, resolveMonsterStats } from '../../utils/combat/statEngine';
 import { SKILL_IDS } from '../../utils/combat/skillData';
 
 export default class CalculatorPage extends Component {
@@ -77,6 +77,7 @@ export default class CalculatorPage extends Component {
         const fullyAllocated = levelUpChoicesSum === Math.max(0, build.level - 1);
 
         const resolvedStats = this.getResolvedPlayerStats();
+        const resolvedMonsterStats = monster ? resolveMonsterStats(monster, [], this.getConditionsById()) : null;
 
         let summary = null;
         if (monster && fullyAllocated && resolvedStats) {
@@ -123,6 +124,7 @@ export default class CalculatorPage extends Component {
                         <OpponentPicker
                             opponentId={opponentId}
                             monsters={this.props.monsters}
+                            resolvedStats={resolvedMonsterStats}
                             onChange={id => this.setOpponentId(id)}
                         />
                         <ResultsPanel summary={summary} opponentSelected={!!monster} pointsFullyAllocated={fullyAllocated}/>

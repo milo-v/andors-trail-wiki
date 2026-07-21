@@ -12,7 +12,7 @@ const STAT_ROWS = [
     { key: 'attackCost', label: 'Attack Cost' },
 ];
 
-export default function OpponentPicker({ opponentId, monsters, onChange }) {
+export default function OpponentPicker({ opponentId, monsters, resolvedStats, onChange }) {
     const options = monsters.map(m => ({ value: m.id, label: m.name }));
     const monster = monsters.find(m => m.id === opponentId) || null;
     return (
@@ -25,11 +25,11 @@ export default function OpponentPicker({ opponentId, monsters, onChange }) {
                 allowClear={true}
                 placeholder="Select monster..."
             />
-            {monster ? (
+            {monster && resolvedStats ? (
                 <div style={{ marginTop: 8 }}>
-                    <div>Attack Damage: {monster.attackDamage?.min ?? 0}-{monster.attackDamage?.max ?? 0}</div>
+                    <div>Attack Damage: {resolvedStats.damagePotential.min}-{resolvedStats.damagePotential.max}</div>
                     {STAT_ROWS.map(({ key, label }) => (
-                        <div key={key}>{label}: {monster[key] ?? 0}</div>
+                        <div key={key}>{label}: {resolvedStats[key]}</div>
                     ))}
                 </div>
             ) : (
