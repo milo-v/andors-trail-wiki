@@ -291,7 +291,7 @@ implementation cycle.
       now gets resolved monster stats from `CalculatorPage` (via `resolveMonsterStats`,
       the same helper `combatMath.js` uses) instead of reading raw JSON fields with
       its own separate `?? 0` fallback, so fixes like #3 reach the display too.
-- [ ] **Phase C** (brainstorm → spec → plan → implement)
+- [x] **Phase C** (brainstorm → spec → plan → implement) — done 2026-07-21
   - [x] Brainstormed and written to
         `docs/superpowers/specs/2026-07-21-damage-calculator-phase-c-design.md`
         (gitignored, not committed). Key pivot from the original tracker note:
@@ -300,16 +300,40 @@ implementation cycle.
         scoring unreliable near the curve's edges). Instead: raw stat-delta Pareto
         vectors (offense = attackDamage/attackChance/criticalSkill/
         criticalMultiplier/-attackCost, defense = blockChance/damageResistance/
-        maxHP/maxAP), union of both frontiers per slot, context-free (no baseline
-        build). Proc-effect items (hitEffect/killEffect/useEffect/etc.) and
-        proficiency/fightstyle/MORE_CRITICALS/BETTER_CRITICALS/EATER/CLEAVE skills
-        are exempted from pruning entirely (their value isn't representable in the
-        vectors). New module planned: `src/utils/combat/valueScoring.js`. No UI
-        changes in this phase. Validation via throwaway spot-check script against
-        real Phase A output, not formal correlation.
-  - [ ] User reviews spec (**current step**)
-  - [ ] Phase C plan
-  - [ ] Phase C implementation
+        maxHP/maxAP), context-free (no baseline build). Proc-effect items
+        (hitEffect/killEffect/useEffect/etc.) are exempted from pruning entirely
+        (their value isn't representable in the vectors). **Scope narrowed
+        mid-brainstorm**: skill scoring/pruning was dropped entirely — Phase D
+        will brute-force equipment only, given a fixed, user-chosen skill build,
+        so skills are never searched and don't need scoring. **Added mid-brainstorm**:
+        items within a slot are grouped by `getProficiencySkillForCategory`
+        (light vs heavy armor, per-weapon-type proficiency, etc.) before Pareto
+        pruning, so an item is only ever compared against others that train the
+        same proficiency skill — otherwise e.g. a strong light-armor item could
+        wrongly prune a weak heavy-armor item that's the only valid choice once
+        heavy-armor skill points are on the table.
+  - [x] User reviewed spec, approved
+  - [x] Phase C plan — written to
+        `docs/superpowers/plans/2026-07-21-damage-calculator-phase-c.md` (3 tasks:
+        item vectors + exemption, grouped Pareto frontier + `pruneCandidates`,
+        validation spot-check).
+  - [x] Phase C implementation — `src/utils/combat/valueScoring.js` created,
+        exports `computeOffenseVector`, `computeDefenseVector`, `isExemptItem`,
+        `paretoFrontier`, `pruneCandidates`. Executed inline, single commit
+        `6271d7f` (all 3 tasks' code landed together since Task 1's file write
+        included Task 2's functions). Verified via throwaway scripts (deleted
+        after use) for: vector extraction, Pareto dominance, proficiency
+        grouping (weak heavy-armor item correctly survives against a
+        stat-dominant light-armor item in a different group), and a real-item
+        spot-check (`club1` vs `flail_giant`). That last check caught a flaw in
+        my own plan's stated expectation — I'd claimed `flail_giant` dominates
+        `club1` on every dimension, but it doesn't: `flail_giant`'s higher
+        attack cost (14 AP vs 5 AP) means it loses on the negated attack-cost
+        dimension, so both correctly survive `paretoFrontier` together. This
+        wasn't a code bug — it demonstrated the multi-dimensional vector
+        approach correctly preserving a real damage/AP-cost tradeoff that a
+        single-scalar score would have missed. No UI changes, as planned. No
+        permanent test files added.
 - [ ] **Phase D** (brainstorm → spec → plan → implement)
 
 ## Resuming this work in a new session
