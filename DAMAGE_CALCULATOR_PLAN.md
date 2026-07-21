@@ -366,7 +366,7 @@ implementation cycle.
         (webpack 4, not ejected, no CRACO) which can't support native module
         Web Workers — user chose to upgrade to react-scripts 5.x rather than
         fall back to chunked main-thread execution or add CRACO.
-  - [ ] Phase D implementation (3/7 tasks)
+  - [x] Phase D implementation (7/7 tasks)
     - [x] Task 1 — react-scripts 4.0.2 -> 5.0.1 upgrade for native Web
           Worker support, commit `a8d762c`. Two incidental fixes needed:
           pinned `eslint` to `8.56.0` via `package.json` `overrides`
@@ -415,6 +415,43 @@ implementation cycle.
           `--experimental-loader` resolver hook (not committed) to run
           the verification scripts directly; worth remembering for
           Tasks 5+ if more throwaway Node verification is needed.
+    - [x] Task 5 (optimizerWorker.js) done, commit `16cc07c`. Matches
+          plan; needed one fix not anticipated: CRA's default eslint
+          config forbids the bare `self` global even inside
+          `src/workers/`, so `npm run build` failed until
+          `/* eslint-disable no-restricted-globals */` was added at
+          the top (standard CRA convention for worker files). Build
+          verified the worker code-splits into its own chunk (its
+          sourcemap contains `searchBestBuilds`/`buildCandidateLists`).
+    - [x] Task 6 (OptimizerPanel.jsx) done, commit `d683b62`. Matches
+          the plan's component closely; dropped the unused
+          `SearchableSelect` import.
+    - [x] Task 7 (wired into CalculatorPage.jsx) done, commit
+          `1fcedad`. **Manual dev-server + Playwright verification
+          found and fixed a real bug**: posting `{ build, monster,
+          itemsById, ... }` to the worker threw `DataCloneError` on
+          every run. Root cause: `monster`/`items` are the same
+          objects `Main.jsx`'s `linkTemp()` cross-links for wiki
+          navigation - `monster.droplistLink` (-> `spawnGroupLinks` ->
+          `maps[].objectgroups.keys[]`) holds raw XML-parser element
+          nodes from `MapParser.jsx` (non-serializable, live methods
+          like `getElementsByTagName`), and items carry `conv_links`/
+          `droplists` reaching the same graph plus real object cycles
+          (item -> conv_links -> conversation -> rewards -> same item)
+          - none of it structured-clonable. Fixed by stripping
+          `conv_links`/`droplists` off items and `droplistLink`/
+          `spawnGroupLinks`/`conversationLink` off the monster in
+          `OptimizerPanel.jsx` right before `postMessage` (verified
+          safe by checking every field `statEngine.js`/`combatMath.js`/
+          `valueScoring.js` actually reads off item/monster objects
+          first). Verified live against monster `arulir_1`: a full
+          9-slot unlocked search completed all 1,953,125 combinations
+          with a live-updating top-10 (top result `damagePerTurn`
+          51.17, matching the Results panel exactly after clicking
+          Apply); locking the weapon slot to `Iron dagger` correctly
+          cut the search to 390,625 combos. No `NaN`/`undefined`
+          anywhere. **Phase D complete - damage calculator feature
+          (Phases A-D) is now fully implemented.**
 
 ## Resuming this work in a new session
 
