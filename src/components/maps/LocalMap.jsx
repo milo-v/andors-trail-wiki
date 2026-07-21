@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
 import MapIcon from './MapIcon'
 import Icon from '../Icon'
@@ -11,14 +11,10 @@ const bySpawnGroup = (a, b) => {
 };
 
 export default class MonstersPage extends React.Component {
-    constructor(props) {
-        super(props);
-    }
-
     drawLayerByName = function (data, zoom, name) {
         var field = data.field;
         if (!field) return "";
-        var layers = data.layerList.filter((e,i) => e.name == name);
+        var layers = data.layerList.filter((e,i) => e.name === name);
 
         return field.map((row, index)=>{
             return <RenderRow key={index} data={row} layers={layers} y={index} zoom={zoom}/>
@@ -34,7 +30,7 @@ export default class MonstersPage extends React.Component {
 
             var className = "mapspawn";
             const hash = this.props.location?.hash;
-            if ((hash == '#'+row.name)||(hash == '#'+row.spawngroup)) {
+            if ((hash === '#'+row.name)||(hash === '#'+row.spawngroup)) {
                 className = className + " active"; 
             }
             const quantity = (row.quantity || 1) - 0;
@@ -64,7 +60,7 @@ export default class MonstersPage extends React.Component {
         return script.map((row) => {
             var className = "script"
             const hash = this.props.location?.hash;
-            if (hash == '#'+row.name) {
+            if (hash === '#'+row.name) {
                 className = className + " active"; 
             }
             const result = [];
@@ -95,7 +91,7 @@ export default class MonstersPage extends React.Component {
                 height: row.height,
             };
             var className = "mapchange";
-            if (this.props.location?.hash == '#'+row.name) {
+            if (this.props.location?.hash === '#'+row.name) {
                 className = className + " active";
             }
             const href = "/map/" + row.map + "#" + row.place;

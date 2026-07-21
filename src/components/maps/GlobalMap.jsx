@@ -1,13 +1,8 @@
-import React, { Component } from 'react';
+import React from 'react';
 import debug from '../../utils/debug'
-import Icon from './MapIcon'
-import LocalMap from './LocalMap'
 import { Link } from 'react-router-dom';
 
 export default class MonstersPage extends React.Component {
-    constructor(props) {
-        super(props);
-    }
     getRowsData = function (data, zoom) {
         var maps = data.maps;
         if (!maps) return "";
@@ -27,7 +22,7 @@ export default class MonstersPage extends React.Component {
             const src = process.env.PUBLIC_URL + "/backgrounds/" + row.id + ".jpg";
             return (
                 <Link style={style} title={row.id} key={index} to={href}>
-                    <img style={style2} src={src} />
+                    <img alt="" style={style2} src={src} />
                 </Link>
             )
         })

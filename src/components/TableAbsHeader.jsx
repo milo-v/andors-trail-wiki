@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 
 export default class TableAbsHeader extends React.Component {
 
@@ -32,7 +32,6 @@ export default class TableAbsHeader extends React.Component {
 
         const columns = this.props.columns
         const size = this.props.size
-        const bot = this.props.bot
 
         if (window.scrollY < size.top) return "";
         if (window.scrollY > (size.top + size.height - 50)) return "";
@@ -50,7 +49,7 @@ export default class TableAbsHeader extends React.Component {
 const RenderHead = (props) => {
     return <div className='absHeader' style={props.style1}  >
                 {props.columns
-                    .filter((e)=> !(e.visible == false))
+                    .filter((e)=> !(e.visible === false))
                     .map((e)=>{return (
                             <div key={e.id} className='absSubHeader' style={{width:`${e.width}`}}>
                                 <div className='absSubHeaderInner' >{e.label}</div>

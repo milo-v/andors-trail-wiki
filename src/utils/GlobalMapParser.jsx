@@ -26,7 +26,7 @@ function parseSegment(segment) {
 }
 function parseArea(children) {
     var result = {};
-    children.filter((e) => e.name == "namedarea").forEach((e) => {
+    children.filter((e) => e.name === "namedarea").forEach((e) => {
         result[e.attributes.id] = e.attributes;
     });
     return result;
@@ -36,7 +36,7 @@ function parseMaps(children, areas) {
         maps: [],
         mapsMap: {},
     };
-    children.filter((e) => e.name == "map").forEach((e) => {
+    children.filter((e) => e.name === "map").forEach((e) => {
         var map = {
             ...e.attributes,
             x: e.attributes.x * 1,

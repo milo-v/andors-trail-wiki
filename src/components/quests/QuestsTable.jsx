@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import GridTable from '@nadavshaar/react-grid-table';
 import '../../@nadavshaar/react-grid-table/dist/index.css';
 import NameCell from "./NameCell";
@@ -12,27 +12,13 @@ const sortStr = ({a, b, isAscending}) => {
     if(aa < bb) return isAscending ? -1 : 1; 
     return 0; 
 }
-const sortInt = ({a, b, isAscending}) => {
-    let aa = a||0;
-    let bb = b||0;
-    if(aa > bb) return isAscending ? 1 : -1; 
-    if(aa < bb) return isAscending ? -1 : 1; 
-    return 0; 
-}
 const sortDT = ({a, b, isAscending}) => {
     const list = ["ordinary","quest","rare","extraordinary","legendary",""];
     let aa = list.indexOf(a);
     let bb = list.indexOf(b);
-    if(aa > bb) return isAscending ? 1 : -1; 
-    if(aa < bb) return isAscending ? -1 : 1; 
-    return 0; 
-}
-const aInt = ({a, b, isAscending}) => {
-    let aa = a||0;
-    let bb = b||0;
-    if(aa > bb) return isAscending ? 1 : -1; 
-    if(aa < bb) return isAscending ? -1 : 1; 
-    return 0; 
+    if(aa > bb) return isAscending ? 1 : -1;
+    if(aa < bb) return isAscending ? -1 : 1;
+    return 0;
 }
 
 const hashLinkScroll = () => {
@@ -125,7 +111,7 @@ const IconCell = ({tableManager, value, onChange, isEdit, data, column, rowIndex
     const href = (data.rootLink) + data.id;
     return <Link to={href}>
                <div id={value} className="TableAncor"/>
-               <img style={{paddingLeft: 1, paddingTop: 5}} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/>
+               <img alt="" style={{paddingLeft: 1, paddingTop: 5}} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/>
            </Link>
 }
 const TextCell = ({tableManager, value, onChange, isEdit, data, column, rowIndex, searchText, isFirstEditableCell}) => {

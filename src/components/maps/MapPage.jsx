@@ -1,15 +1,11 @@
-import React, { Component } from 'react';
-import { Switch, Route } from 'react-router-dom';
+import React from 'react';
+import { Switch } from 'react-router-dom';
 import LiLink from '../LiLink'
 import PropsRoute from '../PropsRoute';
 import LocalMap from './LocalMap';
 import GlobalMap from './GlobalMap';
 
 export default class Page extends React.Component {
-    constructor(props) {
-        super(props);
-    }
-
     getSegmentLinks = function (data, pathname) {
         var segments = data.segments;
         if (!segments) return "";
@@ -26,7 +22,7 @@ export default class Page extends React.Component {
         return (
             <div>
                 <ul className="hr">
-                    <img src={process.env.PUBLIC_URL+"/image/sort_desc.png"} style={{float:'left', marginTop:-10}} onClick={this.props.toggleExpand}/>
+                    <img alt="" src={process.env.PUBLIC_URL+"/image/sort_desc.png"} style={{float:'left', marginTop:-10}} onClick={this.props.toggleExpand}/>
                     {(this.props.expanded) && this.getSegmentLinks(globalMap, location.pathname)}
                 </ul>
                 <Switch>

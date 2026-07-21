@@ -1,22 +1,13 @@
-import React, { Component } from 'react';
+import React from 'react';
 import GridTable from '@nadavshaar/react-grid-table';
 import '../../@nadavshaar/react-grid-table/dist/index.css';
-import debug from '../../utils/debug'
 import IconCell from "../cells/IconCell"
 import { getDimentionById } from "../Icon"
 import ConditionsCell from "../cells/ConditionsCell"
-import OtherCell from "../cells/OtherCell"
 import RangeCell from "../cells/RangeCell"
 import NameCell from "./NameCell"
 import TableAbsHeader from "../TableAbsHeader";
 
-const sortStr = ({a, b, isAscending}) => {
-    let aa = a||"";
-    let bb = b||"";
-    if(aa > bb) return isAscending ? 1 : -1; 
-    if(aa < bb) return isAscending ? -1 : 1; 
-    return 0; 
-}
 const sortInt = ({a, b, isAscending}) => {
     let aa = a||0;
     let bb = b||0;

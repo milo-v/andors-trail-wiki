@@ -1,6 +1,4 @@
 import React from 'react';
-import debug from '../../utils/debug';
-import MapsList from '../MapsList';
 import SellItemsTable from './LinksTable';
 import QuestItemsTable from './QuestItemsTable';
 import QuestsTable from './QuestsTable';
@@ -9,7 +7,7 @@ import '../css/ExpandingName.css';
 const fixedBaseHeight = 19.8;
 const fixedUnitHeight = 29.8;
 
-const unique = (item, pos, self) => self.indexOf(item) == pos;
+const unique = (item, pos, self) => self.indexOf(item) === pos;
 
 export default class ExpandingName extends React.Component {
 
@@ -60,7 +58,7 @@ export default class ExpandingName extends React.Component {
                     style={{height: this.fixedHeight}}
                     onClick={this.toggleExpand}
                 >
-                    <img src="../image/sort_desc.png" />
+                    <img alt="" src="../image/sort_desc.png" />
                     <span className='expandedText'>{value}</span>
                 </div>
                 <div className="expandedTable">

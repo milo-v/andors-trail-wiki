@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import Icon from '../Icon';
 import { HashLink as Link } from 'react-router-hash-link';
 
@@ -55,8 +55,4 @@ const RenderRow = (props) => {
 const RenderHref = (o) => {
     const href = o.rootLink + o.id;
     return <Link to={href}>{o.name}</Link>
-}
-const Range = (o) => {
-    if (o.max == o.min) return o.max;
-    return o.min + "-" + o.max;
 }

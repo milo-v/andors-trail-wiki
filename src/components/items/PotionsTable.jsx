@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import GridTable from '@nadavshaar/react-grid-table';
 import '../../@nadavshaar/react-grid-table/dist/index.css';
 import IconCell from "../cells/IconCell";
@@ -26,13 +26,6 @@ const sortDT = ({a, b, isAscending}) => {
     const list = ["ordinary","quest","rare","extraordinary","legendary",""];
     let aa = list.indexOf(a);
     let bb = list.indexOf(b);
-    if(aa > bb) return isAscending ? 1 : -1; 
-    if(aa < bb) return isAscending ? -1 : 1; 
-    return 0; 
-}
-const aInt = ({a, b, isAscending}) => {
-    let aa = a||0;
-    let bb = b||0;
     if(aa > bb) return isAscending ? 1 : -1; 
     if(aa < bb) return isAscending ? -1 : 1; 
     return 0; 

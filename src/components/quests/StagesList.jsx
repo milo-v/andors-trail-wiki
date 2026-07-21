@@ -1,5 +1,4 @@
-import React, { Component } from 'react';
-import Icon from '../Icon';
+import React from 'react';
 
 const styles = {
     root: {
@@ -11,10 +10,6 @@ const styles = {
 }
 
 export default class Table extends React.Component {
-
-    constructor(props) {
-        super(props);
-    }
 
     getRowsData = function () {
         var data = this.props.data;

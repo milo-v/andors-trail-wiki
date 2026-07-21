@@ -1,14 +1,7 @@
-import React, { Component } from 'react';
+import React from 'react';
 
 
 export default class Table extends React.Component {
-
-    constructor(props) {
-        super(props);
-    }
-
-
-
 
     render() {
         return ( <div style={{textAlign:'left', margin:10}}>

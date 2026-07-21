@@ -25,17 +25,6 @@ const getSrc = (id) => {
     const tmp = id?.split(":")
     return process.env.PUBLIC_URL+"/drawable/"+tmp[0]+".png";
 }
-const getTypePosition = (dt) => {
-    switch(dt) {
-        
-        case 'legendary': return  "-128px 0px";
-        case 'extraordinary': return  "-64px 0px";
-        case 'rare': return  "-96px 0px";
-        case 'quest': return  "-32px 0px";
-        
-        default: return "32px 0px";
-    }
-}
 const getPosition = (id, width) => {
     const tmp = id?.split(":")[1]
     var x = - tmp % width * 32;
@@ -64,7 +53,7 @@ const showCondition = (prefix, rowIndex) => {
         const href = "/conditions#"+row.link.id;
         const id = getImgId(row.link.iconID, rowIndex, index);
         return <Link style={styles.aimg} title={title} to={href} key={id} >
-                   <img id={id} src={getSrc(row.link.iconID)} 
+                   <img alt="" id={id} src={getSrc(row.link.iconID)} 
                         onLoad={onImgLoad(row.link.iconID, rowIndex, index)}
                    />
                </Link>

@@ -1,11 +1,7 @@
-import React, { Component } from 'react';
+import React from 'react';
 import ConditionsTable from './ConditionsTable';
 
 export default class ItemsPage extends React.Component {
-    constructor(props) {
-        super(props);
-    }
-
     render() {
         return ( 
             <div>

@@ -1,13 +1,6 @@
-import React, { Component } from 'react';
-import { HashLink as Link } from 'react-router-hash-link';
-import debug from '../../utils/debug';
-import { getDimention } from '../Icon';
+import React from 'react';
 
 export default class Icon extends React.Component {
-
-    constructor(props) {
-        super(props);
-    }
 
     render() {
 
@@ -33,7 +26,7 @@ export default class Icon extends React.Component {
         return <div style={{ width:`${dx}px`, height:`${dy}px`, overflow: 'hidden',
                             position: 'absolute', left: this.props.x, top: this.props.y
                             }} >
-                    <img src={src} style={style} />
+                    <img alt="" src={src} style={style} />
                </div>
     }
 }

@@ -18,7 +18,7 @@ const styles = {
 const Cell = ({tableManager, value, onChange, isEdit, data, column, rowIndex, searchText, isFirstEditableCell}) => {
     return (
         <div style={styles.root}>
-            {value && <img style={styles.img} src={process.env.PUBLIC_URL+"/image/yes.png"}/>}
+            {value && <img alt="" style={styles.img} src={process.env.PUBLIC_URL+"/image/yes.png"}/>}
         </div>
     )
 }

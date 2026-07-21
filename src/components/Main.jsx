@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import { Switch, Route } from 'react-router-dom';
 import debug, { doIfDebug } from '../utils/debug'
 import PropsRoute from './PropsRoute';
@@ -127,14 +127,14 @@ export default class Main extends React.Component {
     }
     getItemRootLink = (category) => {
        if (!category) return "/items/other#";
-       if (category.actionType == "use") return "/items/use#";
-       if (category.actionType == "equip") return "/items/" + category.inventorySlot + "#";
+       if (category.actionType === "use") return "/items/use#";
+       if (category.actionType === "equip") return "/items/" + category.inventorySlot + "#";
        return "/items/other#";
     }
     isMerchant = (monster) => {
         if (!monster.droplistLink?.items?.length) return false;
         if (monster.droplistLink.items.length > 1) return true;
-        if (monster.droplistLink.items[0].itemID == "gold") return false;
+        if (monster.droplistLink.items[0].itemID === "gold") return false;
         return true;
     }
     
@@ -272,11 +272,11 @@ export default class Main extends React.Component {
                     if (!req.link) {debug(req); return}
                     req.link.conv_links = req.link.conv_links || [];
                     req.link.conv_links.push(c);
-                } else if (type == "dropList") {
+                } else if (type === "dropList") {
                     req.link = this.temp.maps.droplists[id];
                     req.link.conv_links = req.link.conv_links || [];
                     req.link.conv_links.push(c);
-                } else if (type == "killedMonster") {
+                } else if (type === "killedMonster") {
                     req.link = this.temp.maps.monsters[id];
                     req.link.conv_links = req.link.conv_links || [];
                     req.link.conv_links.push(c);
@@ -322,7 +322,7 @@ export default class Main extends React.Component {
             }
         });
         this.temp.items.forEach((item, index) => {
-            if (this.temp.maps.items[item.id] != item) {
+            if (this.temp.maps.items[item.id] !== item) {
                 console.warn("More than one item with id '" + item.id + "'");
                 console.warn(item);
                 this.temp.items.splice(index, 1, false);
@@ -332,7 +332,7 @@ export default class Main extends React.Component {
                 item.categoryLink = this.temp.maps.categories[item.category];
                 if (!item.categoryLink) debug("Item '" + item.id + "' has no resolvable category '" + item.category + "'");
                 item.rootLink=this.getItemRootLink(item.categoryLink);
-                item.baseMarketCost=calculateCost(item, item.categoryLink?.inventorySlot=="weapon");
+                item.baseMarketCost=calculateCost(item, item.categoryLink?.inventorySlot==="weapon");
                 item.priceCost = item.baseMarketCost + Math.trunc(item.baseMarketCost * 0.15);
 
                 item.conditionsCount = this.countConditions(item.equipEffect)
@@ -353,7 +353,7 @@ export default class Main extends React.Component {
         this.temp.items = this.temp.items.filter((e)=>e);
 
         this.temp.monsters.forEach((monster, index) => {
-            if (this.temp.maps.monsters[monster.id] != monster) {
+            if (this.temp.maps.monsters[monster.id] !== monster) {
                 doIfDebug(() => {
                     console.warn("More than one monster with id '" + monster.id + "'");
                     console.warn(monster);
@@ -384,7 +384,7 @@ export default class Main extends React.Component {
                     spawngroupLink.monsters.push(monster);
                     monster.spawnGroupLinks.push(spawngroupLink);
                 }
-                if (monster.spawnGroup && (monster.spawnGroup?.toLowerCase() != monster.id.toLowerCase())){
+                if (monster.spawnGroup && (monster.spawnGroup?.toLowerCase() !== monster.id.toLowerCase())){
                     spawngroupLink = this.temp.maps.spawngroups[monster.spawnGroup?.toLowerCase()] 
                     if (spawngroupLink) {
                         spawngroupLink.monsters.push(monster);
@@ -393,7 +393,7 @@ export default class Main extends React.Component {
                 }
 
                 doIfDebug(() => {
-                    if (monster.spawnGroupLinks.length == 0) {
+                    if (monster.spawnGroupLinks.length === 0) {
                          console.warn("Monster have no spawn");
                          console.warn(monster);
                     }
@@ -428,7 +428,7 @@ export default class Main extends React.Component {
             segment.minY = +9999;
             segment.maps.forEach((map)=>{
                 map.link = this.props.maps[map.id];
-                if (map.link.segmentLink && (map.link.segmentLink.id != segment.id)) {
+                if (map.link.segmentLink && (map.link.segmentLink.id !== segment.id)) {
                     doIfDebug(() => {
                         console.warn(`Map '${map.id}' lined with 2 segments: ${map.link.segmentLink.id}, ${segment.id}`);
                     });
@@ -459,7 +459,7 @@ export default class Main extends React.Component {
           that.temp[name] = that.temp[name] || [];
           that.temp[name] = that.temp[name].concat(json);
           downcounter.progress--;
-          if (downcounter.progress == 0){
+          if (downcounter.progress === 0){
               setCachedData(MAIN_CACHE_KEY, that.temp);
               that.linkTemp()
               that.setState(that.temp);
@@ -539,5 +539,5 @@ export default class Main extends React.Component {
 }
 
 function unique(item, pos, self) {
-    return self.indexOf(item) == pos;
+    return self.indexOf(item) === pos;
 }

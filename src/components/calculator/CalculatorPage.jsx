@@ -9,7 +9,7 @@ import PlayerStatsPanel from './PlayerStatsPanel';
 import OptimizerPanel from './OptimizerPanel';
 import { encodeBuildToQuery, decodeBuildFromQuery } from './buildCodec';
 import {
-    createEmptyBuild, getLevelUpChoicesSum,
+    getLevelUpChoicesSum,
     reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels,
 } from './buildHelpers';
 import { computeCombatSummary } from '../../utils/combat/combatMath';

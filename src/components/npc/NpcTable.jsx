@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import GridTable from '@nadavshaar/react-grid-table';
 import '../../@nadavshaar/react-grid-table/dist/index.css';
 import IconCell from "../cells/IconCell"

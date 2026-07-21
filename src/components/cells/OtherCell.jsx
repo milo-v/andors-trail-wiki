@@ -87,7 +87,7 @@ const knownRoundEffects = [
 const getOther = (prefix, equipEffect, f) => {
     if (!equipEffect) return "";
     const result = Object.keys(equipEffect)
-        .filter((e)=> f.indexOf(e)==-1)
+        .filter((e)=> f.indexOf(e)===-1)
         .map((key) => [key, equipEffect[key]]);
     return (result.length>0) ? prefix + JSON.stringify(result) : "";
 }

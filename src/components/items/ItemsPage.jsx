@@ -1,16 +1,11 @@
-import React, { Component } from 'react';
+import React from 'react';
 import ItemsTable from './ItemsTable.jsx';
 import PotionsTable from './PotionsTable.jsx';
-import { Switch, Route } from 'react-router-dom';
+import { Switch } from 'react-router-dom';
 import PropsRoute from '../PropsRoute';
 import LiLink from '../LiLink'
-import Home from '../Home';
 
 export default class ItemsPage extends React.Component {
-    constructor(props) {
-        super(props);
-    }
-
     render() {
         return (
             <div>
@@ -37,7 +32,7 @@ export default class ItemsPage extends React.Component {
                     {ItemRoute("leftring", this.props.data)}
                     <PropsRoute  path='/items/use' component={PotionsTable}
                         data = { this.props.data } title="Usable"
-                        filter = {(e)=>(e.categoryLink?.actionType=="use")}
+                        filter = {(e)=>(e.categoryLink?.actionType==="use")}
                     />
                     <PropsRoute path='/items/other'  component={ItemsTable}
                         data = { this.props.data } title="Other"
@@ -53,6 +48,6 @@ const ItemRoute = (slot, data) => {
     const path = "/items/"+slot;
     return <PropsRoute  path={path} component={ItemsTable}
                         data = {data} title= {slot}
-                        filter = {(e)=>(e.categoryLink?.inventorySlot == slot)}
+                        filter = {(e)=>(e.categoryLink?.inventorySlot === slot)}
                     />
 }

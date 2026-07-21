@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
 
 
@@ -34,7 +34,7 @@ export default class Table extends React.Component {
 
         return maps?.map((row, index)=>{
             return <Link key={index} to={row.rootLink + row.name + "#" + data[0].key} style={styles.link}>
-                        <img style={styles.img} src={process.env.PUBLIC_URL+"/image/ui_icon_map.png"}  />{row.name}
+                        <img alt="" style={styles.img} src={process.env.PUBLIC_URL+"/image/ui_icon_map.png"}  />{row.name}
                    </Link>
         })
     }
@@ -47,5 +47,5 @@ export default class Table extends React.Component {
     }
 }
 function unique(item, pos, self) {
-    return self.indexOf(item) == pos;
+    return self.indexOf(item) === pos;
 }

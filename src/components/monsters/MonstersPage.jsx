@@ -1,14 +1,10 @@
-import React, { Component } from 'react';
-import { Switch, Route } from 'react-router-dom';
+import React from 'react';
+import { Switch } from 'react-router-dom';
 import PropsRoute from '../PropsRoute';
 import LiLink from '../LiLink'
 import MonstersTable from './MonstersTable';
 
 export default class MonstersPage extends React.Component {
-    constructor(props) {
-        super(props);
-    }
-
     render() {
         return (
             <div>
@@ -36,7 +32,7 @@ export default class MonstersPage extends React.Component {
                     {ItemRoute("ghost", this.props.data)}
                     <PropsRoute  path="/monsters/other" component={MonstersTable}
                         data = {this.props.data} title= "Other"
-                        filter = {(e)=>(e.rootLink=='/monsters/other#')}
+                        filter = {(e)=>(e.rootLink==='/monsters/other#')}
                     />
                 </Switch>
                  </div> 
@@ -47,6 +43,6 @@ const ItemRoute = (c, data) => {
     const path = "/monsters/"+c;
     return <PropsRoute  path={path} component={MonstersTable}
                         data = {data} title= {c}
-                        filter = {(e)=>(!!(e.attackChance||e.maxHP)&&e.monsterClass==c)}
+                        filter = {(e)=>(!!(e.attackChance||e.maxHP)&&e.monsterClass===c)}
                     />
 }

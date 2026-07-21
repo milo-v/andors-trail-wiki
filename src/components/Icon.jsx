@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
 
 const custom = {
@@ -14,10 +14,6 @@ export const getDimentionById = (id) => getDimention(id?.split(":")[0]);
 export const getDimention = (file) => custom[file]||{x:32,y:32};
 
 export default class Icon extends React.Component {
-
-    constructor(props) {
-        super(props);
-    }
 
     render() {
         const {data, prefix, noBackground}= this.props;
@@ -56,7 +52,7 @@ export default class Icon extends React.Component {
                            title={data.displaytype} 
                            to={href}>
                                 <div id={data.id} className="TableAncor"/>
-                                <img id={key} 
+                                <img alt="" id={key} 
                                     src={src} 
                                     onLoad={onImgLoad(index, d, key)}
                                     />

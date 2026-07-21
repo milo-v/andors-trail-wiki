@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React from 'react';
 import Icon from '../Icon';
 import { HashLink as Link } from 'react-router-hash-link';
 

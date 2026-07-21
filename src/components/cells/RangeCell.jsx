@@ -22,8 +22,8 @@ const RangeCell = (...field)=>{
     return ({tableManager, value, onChange, isEdit, data, column, rowIndex, searchText, isFirstEditableCell}) => {
         var range = {data};
         field.forEach((f)=>{range.data = range.data[f]||{}});
-        if (value == "0") return "";
-        if (range.data.min == range.data.max) return (<div style={styles.root}><span style={styles.text}>{value}</span></div>);
+        if (value === "0") return "";
+        if (range.data.min === range.data.max) return (<div style={styles.root}><span style={styles.text}>{value}</span></div>);
         return (
             <div style={styles.root}>
                <span style={styles.text}>{value}({range.data.min}/{range.data.max})</span>

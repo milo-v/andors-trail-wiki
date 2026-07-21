@@ -1,5 +1,4 @@
-import React, { Component } from 'react';
-import Icon from '../Icon';
+import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
 
 export default class Table extends React.Component {
@@ -53,15 +52,7 @@ const RenderRow = (props) => {
         return <td style={style} key ={key[0]}>{key[1](props.data)}</td>
     })
 }
-const RenderHref = (o) => {
-    const href = o.rootLink + o.id;
-    return <Link to={href}>{o.name}</Link>
-}
-const Range = (o) => {
-    if (o.max == o.min) return o.max;
-    return o.min + "-" + o.max;
-}
 const IconCell = (data) => {
     const href = (data.rootLink) + data.id;
-    return <Link to={href}><img title={data.id} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/></Link>
+    return <Link to={href}><img alt="" title={data.id} src={process.env.PUBLIC_URL+"/image/ui_icon_quest.png"}/></Link>
 }

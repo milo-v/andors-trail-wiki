@@ -47,7 +47,7 @@ export default class ExpandingName extends React.Component {
         return (
               <React.Fragment>
                     <div style={{ display:'flex'}} onClick={this.toggleExpand}>
-                            <img src={process.env.PUBLIC_URL + "/image/sort_desc.png"} />
+                            <img alt="" src={process.env.PUBLIC_URL + "/image/sort_desc.png"} />
                             <span style={styles.text}>{value}</span>
                     </div>
                     <div style={styles.table}>
@@ -58,16 +58,4 @@ export default class ExpandingName extends React.Component {
               </React.Fragment> );
 
     }
-}
-
-const getEnemyList = (link) => {
-    var result = [];
-    link.droplist?.links?.forEach((monster) => {
-        result.push({
-            monster,
-            ...link
-        });
-    })
-
-    return result;
 }

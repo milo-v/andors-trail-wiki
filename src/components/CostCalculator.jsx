@@ -46,7 +46,7 @@ const calculateCostEquipEffect = (o, isWeapon) => {
 const calculateUseCost = (o) => {
     if (!o) return 0;
     const averageHPBoost = averagef(o.increaseCurrentHP);
-    if (averageHPBoost == 0) return 0;
+    if (averageHPBoost === 0) return 0;
     const costBoostHP = 0.1*signum(averageHPBoost)*Math.pow(Math.abs(averageHPBoost), 2) + 3*averageHPBoost;
     return Math.trunc(costBoostHP);
 }
@@ -62,7 +62,7 @@ const calculatePointsCost = (o, hpBase, apBase) => {
     if (!o) return 0;
     const averageHPBoost = averagef(o.increaseCurrentHP);
     const averageAPBoost = averagef(o.increaseCurrentAP);
-    if (averageHPBoost == 0 && averageAPBoost == 0) return 0;
+    if (averageHPBoost === 0 && averageAPBoost === 0) return 0;
 
     const costBoostHP = (hpBase*Math.pow(Math.max(0,averageHPBoost), 2.5) + 450*averageHPBoost);
     const costBoostAP = (apBase*Math.pow(Math.max(0,averageAPBoost), 2.5) + 300*averageAPBoost);

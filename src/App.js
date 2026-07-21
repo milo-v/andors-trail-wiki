@@ -1,5 +1,4 @@
 import React,{useState,useEffect} from 'react';
-import logo from './logo.svg';
 import './App.css';
 import Main from './components/Main.jsx';
 import XMLParser from 'react-xml-parser';
@@ -10,6 +9,7 @@ import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from './utils/data
 function App() {
   const [data,setData]=useState([]);
   var  temp = { maps: {} };
+  // eslint-disable-next-line no-extend-native
   String.prototype.capitalize = function() {
     return this.charAt(0).toUpperCase() + this.slice(1);
   }
@@ -51,7 +51,7 @@ function App() {
       
       temp.maps[name] = parseXmlMap(myXml, name);
       downcounter.progress--
-      if (downcounter.progress==0){
+      if (downcounter.progress===0){
         downcounter.tryDo();
       }
     }
@@ -65,7 +65,7 @@ function App() {
       
       temp.globalMap = parseGlobalMap(myXml);
       downcounter.progress--
-      if (downcounter.progress==0){
+      if (downcounter.progress===0){
         downcounter.tryDo();
       }
     }
@@ -94,6 +94,7 @@ function App() {
         getXmlData(process.env.PUBLIC_URL+'/values/loadresources.xml', saveTempResources);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[])
 
   return (

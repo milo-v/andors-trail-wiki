@@ -1,8 +1,8 @@
-import React, { Component } from 'react';
+import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
 
 function unique(item, pos, self) {
-    return self.indexOf(item) == pos;
+    return self.indexOf(item) === pos;
 }
 
 const getRowsData = function (data) {

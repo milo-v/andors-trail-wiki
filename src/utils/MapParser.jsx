@@ -20,18 +20,18 @@ export default function parseXmlMap(r, name) {
                 other: [],
         },
     }
-    if (r.name == "DOCTYPE") {
+    if (r.name === "DOCTYPE") {
         r = r.children[0];
     }
-    if (r.name == "map") {
+    if (r.name === "map") {
         r.children.forEach((e) => {
-            if (e.name == "objectgroup") {
+            if (e.name === "objectgroup") {
                 parseObjectgroups(e, map);
-            } else if (e.name == "layer") {
+            } else if (e.name === "layer") {
                 parseLayer(e, map, name);
-            } else if (e.name == "tileset") {
+            } else if (e.name === "tileset") {
                 parseTileset(e, map, name);
-            } else if (e.name == "properties") {
+            } else if (e.name === "properties") {
                 map[e.name].push(e); // TODO
             } else {
                 console.warn("Custom map section at '" + name + "':");
@@ -47,7 +47,7 @@ export default function parseXmlMap(r, name) {
 function parseObjectgroups(r, map) {
     var objectgroup = { name: r?.attributes?.name };
     r.children?.forEach((e) => {
-        if (e.name == 'properties') {
+        if (e.name === 'properties') {
             e.children?.forEach((p) => {
                 const key = p.attributes?.name;
                 const value = p?.attributes?.value;
@@ -194,14 +194,14 @@ function parseTileset(e, map, name) {
     map.tilesets.push(tileset);
 }
 function parseLayerDebug(e, map, name) {
-    if (map.width && (map.width != e.attributes.width))
+    if (map.width && (map.width !== e.attributes.width))
         console.warn(name + " has different layers(" + map.width + "!=" + e.attributes.width + ")");
-    if (map.height && (map.height != e.attributes.height))
+    if (map.height && (map.height !== e.attributes.height))
         console.warn(name + " has different layers(" + map.height + "!=" + e.attributes.height + ")");
     if (map.layers[e.attributes.name]) {
         console.warn(name + " has several layers: " + e.attributes.name);
     }
-    if (e.children.length != 1) {
+    if (e.children.length !== 1) {
         console.warn(name + " has multi layer: " + e.attributes.name);
     }
 }
@@ -209,7 +209,7 @@ function parseLayer(e, map, name) {
     doIfDebug(() => parseLayerDebug(e, map, name));
     map.layerList.push({
         name: e.attributes.name.toLowerCase(),
-        visible: (e.attributes.visible != "0"),
+        visible: (e.attributes.visible !== "0"),
     });
     map.width = e.attributes.width - 0;
     map.height = e.attributes.height - 0;
@@ -228,7 +228,7 @@ function validateTilesets(map) {
     map.tilesets.forEach((t) => {
         const id = t.firstgid;
         var tileset = map.tilesets.find((e) => ((id >= e.firstgid) && (id < (e.firstgid + e.tilecount))));
-        if (tileset != t) {
+        if (tileset !== t) {
             tileset.firstgid = -9999; // current game use last tileset, so we disable prevoious ones
             doIfDebug(() => {
                 console.warn("Intersecting tilesets indexes at '" + map.name + "'");
@@ -254,7 +254,7 @@ function setTileByLayerXY(map, layer, x, y) {
     }
 }
 function getTileById(map, layer, id) {
-    if (id == 0)
+    if (id === 0)
         return;
     var tileset = map.tilesets.find((e) => ((id >= e.firstgid) && (id < (e.firstgid + e.tilecount))));
     if (!tileset) {
@@ -290,7 +290,7 @@ function propertyCheck(c, e, names) {
                 console.warn(e[c.attributes.name]);
                 console.warn(c);
             }
-            if (c.name != "property") {
+            if (c.name !== "property") {
                  console.warn("Unknown children!");
                  console.warn(c);
             }
@@ -298,7 +298,7 @@ function propertyCheck(c, e, names) {
                  console.warn("More then zero children!");
                  console.warn(c);
             }
-            if (names.indexOf(c.attributes.name) == -1 ) {
+            if (names.indexOf(c.attributes.name) === -1 ) {
                  console.warn("Unknown children!");
                  console.warn(c);
             }
