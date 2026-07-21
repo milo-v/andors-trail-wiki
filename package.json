@@ -8,6 +8,7 @@
     "@testing-library/jest-dom": "^5.11.9",
     "@testing-library/react": "^11.2.5",
     "@testing-library/user-event": "^12.6.3",
+    "atob": "^2.1.2",
     "canvas": "^2.7.0",
     "pako": "^2.0.3",
     "react": "^17.0.1",
@@ -15,7 +16,7 @@
     "react-router": "^5.2.0",
     "react-router-dom": "^5.2.0",
     "react-router-hash-link": "^2.4.0",
-    "react-scripts": "4.0.2",
+    "react-scripts": "^5.0.1",
     "react-xml-parser": "^1.1.8",
     "web-vitals": "^1.1.0"
   },
@@ -42,5 +43,8 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "overrides": {
+    "eslint": "8.56.0"
   }
 }
