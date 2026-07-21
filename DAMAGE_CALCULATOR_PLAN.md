@@ -277,7 +277,39 @@ implementation cycle.
       correctly dropped Max HP to 120. Gated skills (e.g. Combat Speed) correctly
       greyed out below their required level. Opponent stats block and net
       HP-change coloring both confirmed against a real monster (`arulir_1`).
+- [x] **Phase B post-enhancement bug pass** (2026-07-20/21, ad-hoc, no formal
+      spec/plan — small isolated fixes): 1. `288152e` right-ring picker was always
+      empty (game data has one ring category, not separate left/right) + fighting-
+      style weapon-damage bonuses (2h/weapon+shield/dual-wield specializations) were
+      being incorrectly rescaled by `setNonWeaponDamageModifier` instead of feeding
+      into the `weaponDamage` tracker like `SkillController.java`'s `addPercentDamage`.
+      2. `073652d` calculator stopped rendering stats/results entirely when a build
+      had unspent skill points (only level-up choices need full allocation; skill
+      points are already handled safely). 3. `71494eb` monsters with no `maxAP` in
+      JSON now default to 10, matching `MonsterTypeParser.java:44`'s `optInt`
+      fallback (previously showed 0 AP for most monsters). 4. `ae5abc0` `OpponentPicker`
+      now gets resolved monster stats from `CalculatorPage` (via `resolveMonsterStats`,
+      the same helper `combatMath.js` uses) instead of reading raw JSON fields with
+      its own separate `?? 0` fallback, so fixes like #3 reach the display too.
 - [ ] **Phase C** (brainstorm → spec → plan → implement)
+  - [x] Brainstormed and written to
+        `docs/superpowers/specs/2026-07-21-damage-calculator-phase-c-design.md`
+        (gitignored, not committed). Key pivot from the original tracker note:
+        scoring does NOT run items through Phase A's combat formulas (rejected —
+        `getAttackHitChance`'s arctan saturation makes marginal-delta-at-a-baseline
+        scoring unreliable near the curve's edges). Instead: raw stat-delta Pareto
+        vectors (offense = attackDamage/attackChance/criticalSkill/
+        criticalMultiplier/-attackCost, defense = blockChance/damageResistance/
+        maxHP/maxAP), union of both frontiers per slot, context-free (no baseline
+        build). Proc-effect items (hitEffect/killEffect/useEffect/etc.) and
+        proficiency/fightstyle/MORE_CRITICALS/BETTER_CRITICALS/EATER/CLEAVE skills
+        are exempted from pruning entirely (their value isn't representable in the
+        vectors). New module planned: `src/utils/combat/valueScoring.js`. No UI
+        changes in this phase. Validation via throwaway spot-check script against
+        real Phase A output, not formal correlation.
+  - [ ] User reviews spec (**current step**)
+  - [ ] Phase C plan
+  - [ ] Phase C implementation
 - [ ] **Phase D** (brainstorm → spec → plan → implement)
 
 ## Resuming this work in a new session
