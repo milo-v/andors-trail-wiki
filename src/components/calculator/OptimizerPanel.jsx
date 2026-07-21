@@ -1,5 +1,7 @@
 import React, { Component } from 'react';
 import SlotPicker from './SlotPicker';
+import SearchableSelect from './SearchableSelect';
+import Icon from '../Icon';
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
 
 const SLOT_LABELS = {
@@ -8,13 +10,17 @@ const SLOT_LABELS = {
 };
 
 // Main.jsx's linkTemp() cross-links items/monsters with these fields for wiki
-// navigation (conv_links/droplists on items, droplistLink/spawnGroupLinks/
-// conversationLink on monsters) - they reach deep, cyclic, non-serializable
-// object graphs (including raw XML map-parser nodes), which fail
-// postMessage's structured-clone. Combat math never reads them, so strip
-// before sending to the worker.
+// navigation (conv_links/droplists on items; droplistLink/spawnGroupLinks/
+// conversationLink/rewards/requires/questLinks/questItemsLinks/
+// questDropListLinks on monsters, the last five added by linkConversation())
+// - they reach deep, cyclic, non-serializable object graphs (including raw
+// XML map-parser nodes), which fail postMessage's structured-clone. Combat
+// math never reads them, so strip before sending to the worker.
 const UNSAFE_ITEM_KEYS = ['conv_links', 'droplists'];
-const UNSAFE_MONSTER_KEYS = ['droplistLink', 'spawnGroupLinks', 'conversationLink'];
+const UNSAFE_MONSTER_KEYS = [
+    'droplistLink', 'spawnGroupLinks', 'conversationLink',
+    'rewards', 'requires', 'questLinks', 'questItemsLinks', 'questDropListLinks',
+];
 
 function omitKeys(obj, keys) {
     const clone = { ...obj };
@@ -51,6 +57,15 @@ export default class OptimizerPanel extends Component {
 
     setLock(slot, itemId) {
         this.setState({ locks: { ...this.state.locks, [slot]: itemId || undefined } });
+    }
+
+    addExcluded(itemId) {
+        if (!itemId || this.state.excludedItemIds.includes(itemId)) return;
+        this.setState({ excludedItemIds: [...this.state.excludedItemIds, itemId] });
+    }
+
+    removeExcluded(itemId) {
+        this.setState({ excludedItemIds: this.state.excludedItemIds.filter(id => id !== itemId) });
     }
 
     run() {
@@ -97,8 +112,13 @@ export default class OptimizerPanel extends Component {
 
     render() {
         const { items, monster, onApplyBuild } = this.props;
-        const { locks, maxItemLevel, maxHpLossPerKill, running, evaluated, total, top10 } = this.state;
+        const { locks, maxItemLevel, excludedItemIds, maxHpLossPerKill, running, evaluated, total, top10 } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
+
+        const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
+        const excludableOptions = items
+            .filter(item => !excludedItemIds.includes(item.id))
+            .map(item => ({ value: item.id, label: item.name }));
 
         return (
             <div style={{ marginTop: 20, borderTop: '1px solid #444', paddingTop: 10 }}>
@@ -113,6 +133,25 @@ export default class OptimizerPanel extends Component {
                     <label style={{ display: 'inline-block', width: 140 }}>Max item level</label>
                     <input type="number" step="5" value={maxItemLevel}
                         onChange={e => this.setState({ maxItemLevel: e.target.value })} placeholder="No cap" />
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                    <label style={{ display: 'inline-block', width: 140, verticalAlign: 'top' }}>Excluded items</label>
+                    <SearchableSelect
+                        options={excludableOptions}
+                        value={null}
+                        onChange={id => this.addExcluded(id)}
+                        placeholder="Add item to exclude..."
+                    />
+                    {excludedItemIds.length > 0 && (
+                        <ul style={{ margin: '4px 0 0 140px', padding: 0, listStyle: 'none' }}>
+                            {excludedItemIds.map(id => (
+                                <li key={id}>
+                                    {itemsById[id]?.name || id}
+                                    <button type="button" onClick={() => this.removeExcluded(id)} style={{ marginLeft: 8 }}>Remove</button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                 </div>
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Max HP loss/kill</label>
@@ -132,12 +171,27 @@ export default class OptimizerPanel extends Component {
                 {top10.length > 0 && (
                     <table style={{ marginTop: 10, width: '100%' }}>
                         <thead>
-                            <tr><th>#</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
+                            <tr><th>#</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
                         </thead>
                         <tbody>
                             {top10.map((entry, i) => (
                                 <tr key={i}>
                                     <td>{i + 1}</td>
+                                    <td>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                                            {EQUIP_SLOTS.map(slot => {
+                                                const item = itemsById[entry.equipment[slot]];
+                                                if (!item) return null;
+                                                return (
+                                                    <div key={slot} style={{ width: 24, height: 24, overflow: 'hidden' }}>
+                                                        <div style={{ width: 32, height: 32, transform: 'scale(0.75)', transformOrigin: 'top left' }}>
+                                                            <Icon data={item} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </td>
                                     <td>{entry.summary.damagePerTurn.toFixed(2)}</td>
                                     <td>{Number.isFinite(entry.summary.hpLossPerKill) ? entry.summary.hpLossPerKill.toFixed(2) : '∞'}</td>
                                     <td>{entry.summary.difficultyLabel}</td>

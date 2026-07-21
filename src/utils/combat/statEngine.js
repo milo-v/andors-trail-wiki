@@ -341,14 +341,51 @@ export function applyGeneralCombatSkills(stats, skillLevels) {
 
 // --- Active conditions, damage modifier, final assembly ---
 
-// ActorStatsController.java:248-252 (applyEffectsFromCurrentConditions).
-export function applyActiveConditions(stats, activeConditions, conditionsById) {
-    for (const { conditionId, magnitude } of activeConditions || []) {
+// ActorStatsController.java:43-49 (addConditionsFromEquippedItem). Every
+// equipped item's equipEffect.addedConditions applies to the player for as
+// long as it stays equipped (e.g. Feline gloves grant +AC/+BC but also
+// inflict Clumsiness on the wearer).
+export function getEquipmentConditions(equipped) {
+    const entries = [];
+    for (const slot of EQUIP_SLOTS) {
+        const item = equipped[slot];
+        for (const { condition, magnitude } of item?.equipEffect?.addedConditions || []) {
+            entries.push({ conditionId: condition, magnitude });
+        }
+    }
+    return entries;
+}
+
+// ActorStatsController.java:176-212 (addStackableActorCondition /
+// addNonStackableActorCondition). Multiple instances of the same condition
+// (from equipment and/or manually-tracked active conditions) don't simply add
+// up: conditions flagged isStacking sum their magnitudes, non-stacking
+// conditions keep only the single highest-magnitude instance.
+function mergeConditionInstances(entries, conditionsById) {
+    const merged = new Map();
+    for (const { conditionId, magnitude } of entries) {
         const condition = conditionsById[conditionId];
         if (!condition) {
             debug(`Damage calculator: unknown condition id '${conditionId}' in build`);
             continue;
         }
+        const existing = merged.get(conditionId);
+        if (existing === undefined) {
+            merged.set(conditionId, magnitude);
+        } else if (condition.isStacking) {
+            merged.set(conditionId, existing + magnitude);
+        } else {
+            merged.set(conditionId, Math.max(existing, magnitude));
+        }
+    }
+    return merged;
+}
+
+// ActorStatsController.java:248-252 (applyEffectsFromCurrentConditions).
+export function applyActiveConditions(stats, activeConditions, conditionsById) {
+    const merged = mergeConditionInstances(activeConditions || [], conditionsById);
+    for (const [conditionId, magnitude] of merged) {
+        const condition = conditionsById[conditionId];
         if (condition.abilityEffect) {
             applyAbilityEffects(stats, condition.abilityEffect, magnitude);
         }
@@ -412,10 +449,18 @@ export function resolvePlayerStats(build, { itemsById, conditionsById }) {
         equipped[slot] = item || null;
     }
 
+    // A two-handed weapon occupies both hands - the game's inventory UI
+    // never lets an off-hand item coexist with one, so treat the shield
+    // slot as empty for stat purposes regardless of what `build` holds.
+    if (isTwohandWeapon(equipped.weapon)) {
+        equipped.shield = null;
+    }
+
     const weaponDamage = applyEquipment(stats, equipped, build.skillLevels);
     applyItemProficiencies(stats, equipped, build.skillLevels);
     applyGeneralCombatSkills(stats, build.skillLevels);
-    applyActiveConditions(stats, build.activeConditions, conditionsById);
+    const equipmentConditions = getEquipmentConditions(equipped);
+    applyActiveConditions(stats, [...equipmentConditions, ...(build.activeConditions || [])], conditionsById);
     applyNonWeaponDamageModifier(stats, equipped, weaponDamage, build.skillLevels);
     clampStats(stats);
 

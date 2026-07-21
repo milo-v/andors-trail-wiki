@@ -1,7 +1,7 @@
 import { computeOffenseVector, computeDefenseVector } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
-import { EQUIP_SLOTS } from './statEngine';
+import { EQUIP_SLOTS, isTwohandWeapon } from './statEngine';
 import { computeCombatSummary } from './combatMath';
 
 function sum(vector) {
@@ -46,6 +46,13 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}) {
             result[slot] = selectCandidates(slot, items, filtersBySlot[slot] || {});
         }
     }
+    // A two-handed weapon forces the shield slot empty for stat purposes
+    // (statEngine.js's resolvePlayerStats), so searching shield candidates
+    // alongside an all-two-handed weapon pool only produces duplicate,
+    // functionally-identical builds - skip that wasted search space.
+    if (result.weapon.length > 0 && result.weapon.every(isTwohandWeapon)) {
+        result.shield = [];
+    }
     return result;
 }
 
@@ -84,9 +91,30 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     let top10 = [];
     let evaluated = 0;
 
+    // Shield choice only affects scoring when the weapon isn't two-handed. If the
+    // (possibly mixed) weapon candidate pool includes a two-handed weapon, cartesian()
+    // still independently pairs it with every shield candidate - resolvePlayerStats
+    // nulls the shield for all of them alike, so only the first is worth evaluating;
+    // the rest are skipped rather than filling the leaderboard with cosmetic
+    // duplicates. Locked shields (candidateLists.shield.length <= 1) have nothing to
+    // dedupe against, so they're left alone.
+    const shieldCandidates = candidateLists.shield || [];
+
     for (const combo of cartesian(candidateLists)) {
+        const twoHanded = combo.weapon && isTwohandWeapon(combo.weapon);
+        if (twoHanded && combo.shield && shieldCandidates.length > 1 && combo.shield !== shieldCandidates[0]) {
+            evaluated++;
+            if (evaluated % yieldEveryN === 0) {
+                if (onProgress) onProgress({ evaluated, total, top10 });
+                if (shouldCancel && shouldCancel()) return top10;
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            continue;
+        }
+
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
+        if (twoHanded) equipment.shield = null;
         const candidateBuild = { ...build, equipment };
         const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById });
 
