@@ -2,6 +2,8 @@ import React, { Component } from 'react';
 import SlotPicker from './SlotPicker';
 import SearchableSelect from './SearchableSelect';
 import Icon from '../Icon';
+import ItemStatsCard from './ItemStatsCard';
+import { getItemsForSlot } from './buildHelpers';
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
 
 const SLOT_LABELS = {
@@ -34,12 +36,14 @@ export default class OptimizerPanel extends Component {
         this.state = {
             locks: {},
             maxItemLevel: '',
+            categoryFilters: {},
             excludedItemIds: [],
             maxHpLossPerKill: '',
             running: false,
             evaluated: 0,
             total: 0,
             top10: [],
+            cardItem: null,
         };
         this.worker = null;
     }
@@ -59,6 +63,17 @@ export default class OptimizerPanel extends Component {
         this.setState({ locks: { ...this.state.locks, [slot]: itemId || undefined } });
     }
 
+    addCategoryFilter(slot, categoryId) {
+        const current = this.state.categoryFilters[slot] || [];
+        if (!categoryId || current.includes(categoryId)) return;
+        this.setState({ categoryFilters: { ...this.state.categoryFilters, [slot]: [...current, categoryId] } });
+    }
+
+    removeCategoryFilter(slot, categoryId) {
+        const current = this.state.categoryFilters[slot] || [];
+        this.setState({ categoryFilters: { ...this.state.categoryFilters, [slot]: current.filter(id => id !== categoryId) } });
+    }
+
     addExcluded(itemId) {
         if (!itemId || this.state.excludedItemIds.includes(itemId)) return;
         this.setState({ excludedItemIds: [...this.state.excludedItemIds, itemId] });
@@ -66,6 +81,15 @@ export default class OptimizerPanel extends Component {
 
     removeExcluded(itemId) {
         this.setState({ excludedItemIds: this.state.excludedItemIds.filter(id => id !== itemId) });
+    }
+
+    showCard(item, event) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        this.setState({ cardItem: item, cardPosition: { top: rect.bottom + window.scrollY, left: rect.left + window.scrollX } });
+    }
+
+    closeCard() {
+        this.setState({ cardItem: null });
     }
 
     run() {
@@ -83,7 +107,10 @@ export default class OptimizerPanel extends Component {
         const excludedSet = new Set(this.state.excludedItemIds);
         const filtersBySlot = {};
         EQUIP_SLOTS.forEach(slot => {
-            filtersBySlot[slot] = { maxItemLevel, excludedItemIds: excludedSet };
+            filtersBySlot[slot] = {
+                maxItemLevel, excludedItemIds: excludedSet,
+                categoryIds: new Set(this.state.categoryFilters[slot] || []),
+            };
         });
 
         const maxHpLossPerKill = this.state.maxHpLossPerKill === '' ? undefined : Number(this.state.maxHpLossPerKill);
@@ -112,7 +139,7 @@ export default class OptimizerPanel extends Component {
 
     render() {
         const { items, monster, onApplyBuild } = this.props;
-        const { locks, maxItemLevel, excludedItemIds, maxHpLossPerKill, running, evaluated, total, top10 } = this.state;
+        const { locks, maxItemLevel, categoryFilters, excludedItemIds, maxHpLossPerKill, running, evaluated, total, top10, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
@@ -120,15 +147,44 @@ export default class OptimizerPanel extends Component {
             .filter(item => !excludedItemIds.includes(item.id))
             .map(item => ({ value: item.id, label: item.name }));
 
+        const categoryOptionsBySlot = {};
+        EQUIP_SLOTS.forEach(slot => {
+            const seen = new Map();
+            getItemsForSlot(slot, items).forEach(item => {
+                if (item.categoryLink) seen.set(item.category, item.categoryLink.name);
+            });
+            categoryOptionsBySlot[slot] = [...seen.entries()].map(([value, label]) => ({ value, label }));
+        });
+
         return (
             <div style={{ marginTop: 20, borderTop: '1px solid #444', paddingTop: 10 }}>
                 <h3>Equipment optimizer</h3>
-                {EQUIP_SLOTS.map(slot => (
-                    <div key={slot} style={{ marginBottom: 6 }}>
-                        <label style={{ display: 'inline-block', width: 140 }}>{SLOT_LABELS[slot]} lock</label>
-                        <SlotPicker slot={slot} items={items} value={locks[slot]} onChange={id => this.setLock(slot, id)} />
-                    </div>
-                ))}
+                {EQUIP_SLOTS.map(slot => {
+                    const selectedCategories = categoryFilters[slot] || [];
+                    const categoryOptions = categoryOptionsBySlot[slot].filter(o => !selectedCategories.includes(o.value));
+                    return (
+                        <div key={slot} style={{ marginBottom: 6 }}>
+                            <label style={{ display: 'inline-block', width: 140 }}>{SLOT_LABELS[slot]} lock</label>
+                            <SlotPicker slot={slot} items={items} value={locks[slot]} onChange={id => this.setLock(slot, id)} />
+                            {!locks[slot] && categoryOptions.length + selectedCategories.length > 0 && (
+                                <div style={{ margin: '2px 0 0 140px' }}>
+                                    <SearchableSelect
+                                        options={categoryOptions}
+                                        value={null}
+                                        onChange={id => this.addCategoryFilter(slot, id)}
+                                        placeholder="Restrict to category..."
+                                    />
+                                    {selectedCategories.map(id => (
+                                        <span key={id} style={{ marginLeft: 6 }}>
+                                            {categoryOptionsBySlot[slot].find(o => o.value === id)?.label || id}
+                                            <button type="button" onClick={() => this.removeCategoryFilter(slot, id)} style={{ marginLeft: 4 }}>×</button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Max item level</label>
                     <input type="number" step="5" value={maxItemLevel}
@@ -183,7 +239,8 @@ export default class OptimizerPanel extends Component {
                                                 const item = itemsById[entry.equipment[slot]];
                                                 if (!item) return null;
                                                 return (
-                                                    <div key={slot} style={{ width: 24, height: 24, overflow: 'hidden' }}>
+                                                    <div key={slot} style={{ width: 24, height: 24, overflow: 'hidden', cursor: 'pointer' }}
+                                                        onClickCapture={e => { e.preventDefault(); e.stopPropagation(); this.showCard(item, e); }}>
                                                         <div style={{ width: 32, height: 32, transform: 'scale(0.75)', transformOrigin: 'top left' }}>
                                                             <Icon data={item} />
                                                         </div>
@@ -200,6 +257,15 @@ export default class OptimizerPanel extends Component {
                             ))}
                         </tbody>
                     </table>
+                )}
+                {cardItem && (
+                    <ItemStatsCard
+                        item={cardItem}
+                        top={cardPosition.top}
+                        left={cardPosition.left}
+                        onExclude={() => { this.addExcluded(cardItem.id); this.closeCard(); }}
+                        onClose={() => this.closeCard()}
+                    />
                 )}
             </div>
         );

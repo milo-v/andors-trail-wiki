@@ -17,7 +17,7 @@ export function combinedScore(item) {
 }
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryId, excludedItemIds } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -25,8 +25,8 @@ export function selectCandidates(slot, items, options = {}) {
             return level === null || level <= maxItemLevel;
         });
     }
-    if (categoryId) {
-        pool = pool.filter(item => item.category === categoryId);
+    if (categoryIds && categoryIds.size > 0) {
+        pool = pool.filter(item => categoryIds.has(item.category));
     }
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
