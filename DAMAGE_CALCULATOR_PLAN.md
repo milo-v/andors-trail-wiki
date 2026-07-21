@@ -335,6 +335,86 @@ implementation cycle.
         single-scalar score would have missed. No UI changes, as planned. No
         permanent test files added.
 - [ ] **Phase D** (brainstorm → spec → plan → implement)
+  - [x] Item-level data curated (2026-07-21): manually assigned levels (steps
+        of 5) for all 480 equippable items via interactive Q&A with the user,
+        grouped by shop/quest-giver/drop-map to speed up batch assignment.
+        Extracted via a temporary `window.__wikiTemp` debug hook in
+        `Main.jsx` (reverted after use) + Playwright browser evaluation to
+        get real linked provenance (droplists/monsters/maps/quests) without
+        reimplementing `linkTemp()`'s cross-linking logic. Saved to
+        `docs/superpowers/data/item_levels.csv` (gitignored, not committed).
+  - [x] Brainstormed and written to
+        `docs/superpowers/specs/2026-07-21-damage-calculator-phase-d-design.md`
+        (gitignored, not committed). User approved. Key decisions: item-level
+        filter is optional/no default cap; per-slot locking (pre-selected
+        items excluded from search entirely); candidate selection per
+        unlocked slot = top 5 by a unified `0.6*offense + 0.4*defense`
+        combined score (proc items compete on equal footing, no bonus);
+        optional per-slot category filter + global exclude list; full
+        brute-force cross-product over candidates (~2M combos worst case,
+        measured live against real item data) scored by Phase A's real
+        `computeCombatSummary`, subject to max-HP-loss-per-kill constraint;
+        runs in a Web Worker with streaming progress bar + live-updating
+        top-10 leaderboard (not just a final result).
+  - [x] Phase D plan — written to
+        `docs/superpowers/plans/2026-07-21-damage-calculator-phase-d.md` (7
+        tasks: upgrade react-scripts 4->5 for native Web Worker support,
+        `itemLevels.js` data module, `optimizer.js` candidate scoring/
+        selection, `optimizer.js` Cartesian search core, `optimizerWorker.js`,
+        `OptimizerPanel.jsx` UI, `CalculatorPage.jsx` wiring). Key toolchain
+        finding during planning: this repo runs `react-scripts@4.0.2`
+        (webpack 4, not ejected, no CRACO) which can't support native module
+        Web Workers — user chose to upgrade to react-scripts 5.x rather than
+        fall back to chunked main-thread execution or add CRACO.
+  - [ ] Phase D implementation (3/7 tasks)
+    - [x] Task 1 — react-scripts 4.0.2 -> 5.0.1 upgrade for native Web
+          Worker support, commit `a8d762c`. Two incidental fixes needed:
+          pinned `eslint` to `8.56.0` via `package.json` `overrides`
+          (eslint 8.57.x regression broke `eslint-config-react-app`'s
+          jest overrides, "Environment key jest/globals is unknown");
+          added `atob` as an explicit dependency (`bin/mapParser.js`
+          requires it directly but it only existed as an incidental
+          transitive dep before, and the upgrade dropped it, breaking
+          `bin/generateMapImages.js`). `npm start`/`npm run build`/
+          `npm test` all verified working. **Known pre-existing,
+          unrelated issue**: `bin/generateMapImages.js` now fails at
+          `context.drawImage is not a function` — `canvas@2.10.2`'s
+          native binding isn't loading under this environment's Node
+          version; `canvas`'s version is unchanged by this upgrade, so
+          not a regression from it. Not fixed (out of scope for Phase D).
+    - [x] Task 2 — `src/utils/combat/itemLevels.js` created, commit
+          `3b8e762`. Ported `docs/superpowers/data/item_levels.csv`
+          (name-keyed) to an id-keyed `ITEM_LEVELS` map + `getItemLevel`.
+          Generation script caught a real bug on first run: the CSV has
+          CRLF line endings, so `header.indexOf('level')` silently
+          failed (matched against `"level\r"`) and produced `NaN` for
+          every single row — verification script's non-null count check
+          (482 expected, 0 found) is what caught it, not the "480/480
+          resolved" count alone, which stayed correct throughout since
+          `nameToLevel[name] !== undefined` is true even for `NaN`. Fixed
+          by stripping `\r\n` before parsing; reran, got 482 non-null
+          entries (482 not 480 because 2 item names collide across
+          different itemlist files, both correctly inheriting the same
+          CSV-assigned level). Verified `getItemLevel('helm_crude_iron')
+          -> 15`, `getItemLevel('nonexistent_item') -> null`.
+    - [x] Tasks 3+4 — `src/utils/combat/optimizer.js` created (candidate
+          scoring/selection + Cartesian search core), commit `df6b026`
+          (landed together in one commit, same file, mirroring Phase
+          C's precedent). Exports `combinedScore`, `selectCandidates`,
+          `buildCandidateLists`, `insertIntoTop10`, `countCombinations`,
+          `searchBestBuilds`. Verified against real game data: every
+          non-empty slot returns exactly 5 candidates with no filters,
+          `rightring`'s pool matches `leftring`'s (both draw from the
+          `leftring` category); a locked-down 5-combination search
+          (only weapon slot open) against monster `arulir_1` produced a
+          real top result (`xulviir` weapon, `damagePerTurn` ≈ 4.96,
+          `hpLossPerKill` ≈ 439.9) — no `NaN`/`undefined`. Verification
+          note: plain-Node ESM can't resolve this repo's extensionless
+          relative imports (`./statEngine` etc., which work fine under
+          webpack) or `.jsx` files — needed a small throwaway
+          `--experimental-loader` resolver hook (not committed) to run
+          the verification scripts directly; worth remembering for
+          Tasks 5+ if more throwaway Node verification is needed.
 
 ## Resuming this work in a new session
 
