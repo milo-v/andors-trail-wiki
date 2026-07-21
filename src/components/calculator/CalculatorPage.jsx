@@ -6,6 +6,7 @@ import ConditionsPanel from './ConditionsPanel';
 import OpponentPicker from './OpponentPicker';
 import ResultsPanel from './ResultsPanel';
 import PlayerStatsPanel from './PlayerStatsPanel';
+import OptimizerPanel from './OptimizerPanel';
 import { encodeBuildToQuery, decodeBuildFromQuery } from './buildCodec';
 import {
     createEmptyBuild, getLevelUpChoicesSum,
@@ -115,6 +116,13 @@ export default class CalculatorPage extends Component {
                             activeConditions={build.activeConditions}
                             conditions={this.props.conditions}
                             onChange={activeConditions => this.updateBuild({ activeConditions })}
+                        />
+                        <OptimizerPanel
+                            items={this.props.items}
+                            monster={monster}
+                            build={build}
+                            conditionsById={this.getConditionsById()}
+                            onApplyBuild={equipment => this.updateBuild({ equipment })}
                         />
                     </div>
                     <div style={{ flex: '1 1 280px', minWidth: 260 }}>
