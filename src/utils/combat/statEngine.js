@@ -438,15 +438,13 @@ export function applyNonWeaponDamageModifier(stats, equipped, weaponDamage, skil
     }
 }
 
-// Full player pipeline, ActorStatsController.recalculatePlayerStats (:275-296) order:
-// base traits -> equipment (incl. fighting styles/dual-wield) -> item proficiencies
-// -> general combat skills -> active conditions -> non-weapon damage modifier -> clamp.
-export function resolvePlayerStats(build, { itemsById, conditionsById }) {
-    const stats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
-
+// Resolves a build's {slot: itemId} equipment into {slot: item|null}, shared by
+// resolvePlayerStats and any UI code that needs to know what's actually
+// equipped (e.g. ConditionsPanel listing equipment-granted conditions).
+export function resolveEquipped(equipment, itemsById) {
     const equipped = {};
     for (const slot of EQUIP_SLOTS) {
-        const itemId = build.equipment[slot];
+        const itemId = equipment[slot];
         if (!itemId) {
             equipped[slot] = null;
             continue;
@@ -464,6 +462,36 @@ export function resolvePlayerStats(build, { itemsById, conditionsById }) {
     if (isTwohandWeapon(equipped.weapon)) {
         equipped.shield = null;
     }
+    return equipped;
+}
+
+// UI helper: equipment-granted conditions with enough detail (resolved name via
+// Main.jsx's linkCondition-populated `.link`, and the source item) to render as
+// locked, non-removable rows in ConditionsPanel - mirrors getEquipmentConditions
+// but keeps the display info that combat math itself doesn't need.
+export function getEquipmentConditionDetails(equipped) {
+    const entries = [];
+    for (const slot of EQUIP_SLOTS) {
+        const item = equipped[slot];
+        for (const entry of item?.equipEffect?.addedConditions || []) {
+            entries.push({
+                conditionId: entry.condition,
+                magnitude: entry.magnitude,
+                name: entry.link?.name || entry.condition,
+                sourceItemName: item.name,
+                slot,
+            });
+        }
+    }
+    return entries;
+}
+
+// Full player pipeline, ActorStatsController.recalculatePlayerStats (:275-296) order:
+// base traits -> equipment (incl. fighting styles/dual-wield) -> item proficiencies
+// -> general combat skills -> active conditions -> non-weapon damage modifier -> clamp.
+export function resolvePlayerStats(build, { itemsById, conditionsById }) {
+    const stats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
+    const equipped = resolveEquipped(build.equipment, itemsById);
 
     const weaponDamage = applyEquipment(stats, equipped, build.skillLevels);
     applyItemProficiencies(stats, equipped, build.skillLevels);
