@@ -384,10 +384,16 @@ function mergeConditionInstances(entries, conditionsById) {
     return merged;
 }
 
-// ActorStatsController.java:248-252 (applyEffectsFromCurrentConditions).
+// ActorStatsController.java:248-252 (applyEffectsFromCurrentConditions). A
+// condition's magnitude can be <= 0 (e.g. equipment granting "immune to fear"
+// encodes that as a deeply negative baseline magnitude, per
+// LinksTable.jsx's own convention that magnitude 0 means "clears" rather than
+// a literal x0 application) - such magnitudes mean the condition isn't
+// actually in effect, not that its ability effect should apply inverted.
 export function applyActiveConditions(stats, activeConditions, conditionsById) {
     const merged = mergeConditionInstances(activeConditions || [], conditionsById);
     for (const [conditionId, magnitude] of merged) {
+        if (magnitude <= 0) continue;
         const condition = conditionsById[conditionId];
         if (condition.abilityEffect) {
             applyAbilityEffects(stats, condition.abilityEffect, magnitude);
