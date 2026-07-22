@@ -41,6 +41,7 @@ export default class OptimizerPanel extends Component {
             unlimitedCandidates: false,
             categoryFilters: {},
             excludedItemIds: [],
+            limitedItemIds: [],
             maxHpLossPerKill: '',
             running: false,
             evaluated: 0,
@@ -84,6 +85,18 @@ export default class OptimizerPanel extends Component {
 
     removeExcluded(itemId) {
         this.setState({ excludedItemIds: this.state.excludedItemIds.filter(id => id !== itemId) });
+    }
+
+    // "Limit 1" items may still appear in the search (unlike excluded items),
+    // just never twice in the same build - see optimizer.js's
+    // hasDisallowedDuplicate for why that only matters for rings/dual-wielding.
+    addLimited(itemId) {
+        if (!itemId || this.state.limitedItemIds.includes(itemId)) return;
+        this.setState({ limitedItemIds: [...this.state.limitedItemIds, itemId] });
+    }
+
+    removeLimited(itemId) {
+        this.setState({ limitedItemIds: this.state.limitedItemIds.filter(id => id !== itemId) });
     }
 
     showCard(item, event) {
@@ -135,6 +148,7 @@ export default class OptimizerPanel extends Component {
         this.setState({ running: true, evaluated: 0, total: 0, top10: [] });
         this.worker.postMessage({
             type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot,
+            limitedItemIds: this.state.limitedItemIds,
         });
     }
 
@@ -146,7 +160,7 @@ export default class OptimizerPanel extends Component {
     render() {
         const { items, monster, onApplyBuild } = this.props;
         const {
-            locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds,
+            locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
             maxHpLossPerKill, running, evaluated, total, top10, cardItem, cardPosition,
         } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
@@ -154,6 +168,9 @@ export default class OptimizerPanel extends Component {
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
         const excludableOptions = items
             .filter(item => !excludedItemIds.includes(item.id))
+            .map(item => ({ value: item.id, label: item.name }));
+        const limitableOptions = items
+            .filter(item => !limitedItemIds.includes(item.id))
             .map(item => ({ value: item.id, label: item.name }));
 
         const categoryOptionsBySlot = {};
@@ -229,6 +246,25 @@ export default class OptimizerPanel extends Component {
                     )}
                 </div>
                 <div style={{ marginBottom: 6 }}>
+                    <label style={{ display: 'inline-block', width: 140, verticalAlign: 'top' }}>Limit to 1 copy</label>
+                    <SearchableSelect
+                        options={limitableOptions}
+                        value={null}
+                        onChange={id => this.addLimited(id)}
+                        placeholder="Add single-copy item..."
+                    />
+                    {limitedItemIds.length > 0 && (
+                        <ul style={{ margin: '4px 0 0 140px', padding: 0, listStyle: 'none' }}>
+                            {limitedItemIds.map(id => (
+                                <li key={id}>
+                                    {itemsById[id]?.name || id}
+                                    <button type="button" onClick={() => this.removeLimited(id)} style={{ marginLeft: 8 }}>Remove</button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+                <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Max HP loss/kill</label>
                     <input type="number" value={maxHpLossPerKill}
                         onChange={e => this.setState({ maxHpLossPerKill: e.target.value })} placeholder="No limit" />
@@ -283,6 +319,7 @@ export default class OptimizerPanel extends Component {
                         top={cardPosition.top}
                         left={cardPosition.left}
                         onExclude={() => { this.addExcluded(cardItem.id); this.closeCard(); }}
+                        onLimit={() => { this.addLimited(cardItem.id); this.closeCard(); }}
                         onClose={() => this.closeCard()}
                     />
                 )}

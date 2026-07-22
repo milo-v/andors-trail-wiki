@@ -91,6 +91,24 @@ export function insertIntoTop10(top10, entry) {
     return next.slice(0, 10);
 }
 
+// Items the user has flagged as single-copy ("limit 1") must not occupy more
+// than one slot in the same build. Most items only fit one canonical slot
+// anyway, so this only ever matters for the leftring/rightring and
+// weapon/shield pairs, which can both draw the same item out of a shared
+// candidate pool (wearing one ring on both hands, or dual-wielding a
+// one-handed weapon against itself) even though only one copy exists.
+function hasDisallowedDuplicate(combo, limitedItemIds) {
+    if (!limitedItemIds || limitedItemIds.size === 0) return false;
+    const seen = new Set();
+    for (const slot of EQUIP_SLOTS) {
+        const item = combo[slot];
+        if (!item || !limitedItemIds.has(item.id)) continue;
+        if (seen.has(item.id)) return true;
+        seen.add(item.id);
+    }
+    return false;
+}
+
 export function countCombinations(candidateLists) {
     return EQUIP_SLOTS.reduce((product, slot) => product * Math.max(1, (candidateLists[slot] || []).length), 1);
 }
@@ -116,7 +134,7 @@ function* cartesian(candidateLists) {
 }
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
-    const { maxHpLossPerKill, onProgress, shouldCancel, yieldEveryN = 5000 } = options;
+    const { maxHpLossPerKill, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000 } = options;
     const total = countCombinations(candidateLists);
     let top10 = [];
     let evaluated = 0;
@@ -130,15 +148,26 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     // dedupe against, so they're left alone.
     const shieldCandidates = candidateLists.shield || [];
 
+    // Advances the evaluated counter and periodically yields/reports progress.
+    // Returns true if the caller should stop (search was cancelled).
+    const tick = async () => {
+        evaluated++;
+        if (evaluated % yieldEveryN === 0) {
+            if (onProgress) onProgress({ evaluated, total, top10 });
+            if (shouldCancel && shouldCancel()) return true;
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        return false;
+    };
+
     for (const combo of cartesian(candidateLists)) {
         const twoHanded = combo.weapon && isTwohandWeapon(combo.weapon);
         if (twoHanded && combo.shield && shieldCandidates.length > 1 && combo.shield !== shieldCandidates[0]) {
-            evaluated++;
-            if (evaluated % yieldEveryN === 0) {
-                if (onProgress) onProgress({ evaluated, total, top10 });
-                if (shouldCancel && shouldCancel()) return top10;
-                await new Promise(resolve => setTimeout(resolve, 0));
-            }
+            if (await tick()) return top10;
+            continue;
+        }
+        if (hasDisallowedDuplicate(combo, limitedItemIds)) {
+            if (await tick()) return top10;
             continue;
         }
 
@@ -152,12 +181,7 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
             top10 = insertIntoTop10(top10, { equipment, summary });
         }
 
-        evaluated++;
-        if (evaluated % yieldEveryN === 0) {
-            if (onProgress) onProgress({ evaluated, total, top10 });
-            if (shouldCancel && shouldCancel()) return top10;
-            await new Promise(resolve => setTimeout(resolve, 0));
-        }
+        if (await tick()) return top10;
     }
 
     if (onProgress) onProgress({ evaluated, total, top10 });
