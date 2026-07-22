@@ -13,7 +13,7 @@ import {
     reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels,
 } from './buildHelpers';
 import { computeCombatSummary } from '../../utils/combat/combatMath';
-import { resolvePlayerStats, resolveMonsterStats } from '../../utils/combat/statEngine';
+import { resolvePlayerStats, resolveMonsterStats, resolveEquipped, getEquipmentConditionDetails } from '../../utils/combat/statEngine';
 import { SKILL_IDS } from '../../utils/combat/skillData';
 
 export default class CalculatorPage extends Component {
@@ -114,6 +114,7 @@ export default class CalculatorPage extends Component {
                         />
                         <ConditionsPanel
                             activeConditions={build.activeConditions}
+                            equipmentConditions={getEquipmentConditionDetails(resolveEquipped(build.equipment, this.getItemsById()))}
                             conditions={this.props.conditions}
                             onChange={activeConditions => this.updateBuild({ activeConditions })}
                         />

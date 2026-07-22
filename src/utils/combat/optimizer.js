@@ -16,6 +16,8 @@ export function combinedScore(item) {
     return 0.6 * sum(computeOffenseVector(item)) + 0.4 * sum(computeDefenseVector(item));
 }
 
+export const CANDIDATES_PER_SLOT = 6;
+
 export function selectCandidates(slot, items, options = {}) {
     const { maxItemLevel, categoryIds, excludedItemIds } = options;
     let pool = getItemsForSlot(slot, items);
@@ -31,7 +33,7 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
-    return [...pool].sort((a, b) => combinedScore(b) - combinedScore(a)).slice(0, 5);
+    return [...pool].sort((a, b) => combinedScore(b) - combinedScore(a)).slice(0, CANDIDATES_PER_SLOT);
 }
 
 export function buildCandidateLists(items, locks, filtersBySlot = {}) {

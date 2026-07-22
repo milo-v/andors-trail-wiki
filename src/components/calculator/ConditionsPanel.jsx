@@ -1,7 +1,7 @@
 import React from 'react';
 import SearchableSelect from './SearchableSelect';
 
-export default function ConditionsPanel({ activeConditions, conditions, onChange }) {
+export default function ConditionsPanel({ activeConditions, equipmentConditions, conditions, onChange }) {
     const options = conditions.map(c => ({ value: c.id, label: c.name }));
 
     const updateRow = (index, patch) => {
@@ -17,6 +17,11 @@ export default function ConditionsPanel({ activeConditions, conditions, onChange
     return (
         <div>
             <h3>Active conditions</h3>
+            {(equipmentConditions || []).map((row, index) => (
+                <div key={`equip-${index}`} style={{ marginBottom: 4, color: '#aaa' }}>
+                    {row.name} x{row.magnitude} <em>(from {row.sourceItemName}, locked)</em>
+                </div>
+            ))}
             {activeConditions.map((row, index) => (
                 <div key={index} style={{ marginBottom: 4 }}>
                     <SearchableSelect
