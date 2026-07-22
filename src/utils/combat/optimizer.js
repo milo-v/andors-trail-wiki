@@ -132,8 +132,36 @@ function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemI
     return pairs;
 }
 
-// Same idea as buildWeaponShieldPairs, for the ring slots.
+function sameCandidateSet(a, b) {
+    if (a.length !== b.length) return false;
+    const idsA = new Set(a.map(item => item.id));
+    return b.every(item => idsA.has(item.id));
+}
+
+// Same idea as buildWeaponShieldPairs, for the ring slots - plus one more
+// optimization specific to rings: statEngine.js's applyEquipment applies
+// leftring/rightring identically (a plain loop over both slots, no
+// left/right-specific logic anywhere), unlike weapon/shield where main-hand
+// vs off-hand genuinely differ (dual-wield efficiency scaling, proficiency
+// keyed to equipped.weapon only). So when both ring slots draw from the
+// exact same candidate pool, {A,B} and {B,A} are stat-identical and only
+// need evaluating once - halving that dimension's search space. Skipped
+// when the pools genuinely differ (per-slot category filters, or a lock on
+// just one side), since swapping isn't necessarily redundant then.
 function buildRingPairs(leftCandidates, rightCandidates, limitedItemIds) {
+    if (leftCandidates.length > 0 && sameCandidateSet(leftCandidates, rightCandidates)) {
+        const pairs = [];
+        for (let i = 0; i < leftCandidates.length; i++) {
+            for (let j = i; j < leftCandidates.length; j++) {
+                const left = leftCandidates[i];
+                const right = leftCandidates[j];
+                if (isDisallowedPair(left, right, limitedItemIds)) continue;
+                pairs.push({ leftring: left, rightring: right });
+            }
+        }
+        return pairs;
+    }
+
     const lefts = leftCandidates.length > 0 ? leftCandidates : [null];
     const rights = rightCandidates.length > 0 ? rightCandidates : [null];
     const pairs = [];
