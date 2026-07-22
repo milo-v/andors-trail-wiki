@@ -72,7 +72,8 @@ export default class OptimizerPanel extends Component {
 
     // "Limit 1" items may still appear in the search (unlike excluded items),
     // just never twice in the same build - see optimizer.js's
-    // hasDisallowedDuplicate for why that only matters for rings/dual-wielding.
+    // buildWeaponShieldPairs/buildRingPairs for why that only matters for
+    // rings/dual-wielding.
     addLimited(itemId) {
         if (!itemId || this.state.limitedItemIds.includes(itemId)) return;
         this.setState({ limitedItemIds: [...this.state.limitedItemIds, itemId] });
