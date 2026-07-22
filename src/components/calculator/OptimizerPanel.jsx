@@ -6,30 +6,12 @@ import ItemStatsCard from './ItemStatsCard';
 import { getItemsForSlot } from './buildHelpers';
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
 import { DEFAULT_CANDIDATES_PER_SLOT } from '../../utils/combat/optimizer';
+import { sanitizeItemForWorker, sanitizeMonsterForWorker, sanitizeConditionForWorker } from '../../utils/combat/workerSanitize';
 
 const SLOT_LABELS = {
     weapon: 'Weapon', shield: 'Shield/Off-hand', head: 'Head', body: 'Body', hand: 'Hand',
     feet: 'Feet', neck: 'Neck', leftring: 'Left ring', rightring: 'Right ring',
 };
-
-// Main.jsx's linkTemp() cross-links items/monsters with these fields for wiki
-// navigation (conv_links/droplists on items; droplistLink/spawnGroupLinks/
-// conversationLink/rewards/requires/questLinks/questItemsLinks/
-// questDropListLinks on monsters, the last five added by linkConversation())
-// - they reach deep, cyclic, non-serializable object graphs (including raw
-// XML map-parser nodes), which fail postMessage's structured-clone. Combat
-// math never reads them, so strip before sending to the worker.
-const UNSAFE_ITEM_KEYS = ['conv_links', 'droplists'];
-const UNSAFE_MONSTER_KEYS = [
-    'droplistLink', 'spawnGroupLinks', 'conversationLink',
-    'rewards', 'requires', 'questLinks', 'questItemsLinks', 'questDropListLinks',
-];
-
-function omitKeys(obj, keys) {
-    const clone = { ...obj };
-    keys.forEach(key => delete clone[key]);
-    return clone;
-}
 
 export default class OptimizerPanel extends Component {
     constructor(props) {
@@ -113,9 +95,12 @@ export default class OptimizerPanel extends Component {
         const { items, monster, build } = this.props;
         if (!monster) return;
 
-        const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: omitKeys(item, UNSAFE_ITEM_KEYS) }), {});
-        const sanitizedMonster = omitKeys(monster, UNSAFE_MONSTER_KEYS);
-        const conditionsById = this.props.conditionsById || {};
+        const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: sanitizeItemForWorker(item) }), {});
+        const sanitizedMonster = sanitizeMonsterForWorker(monster);
+        const conditionsById = {};
+        Object.entries(this.props.conditionsById || {}).forEach(([id, condition]) => {
+            conditionsById[id] = sanitizeConditionForWorker(condition);
+        });
 
         const locks = {};
         Object.entries(this.state.locks).forEach(([slot, itemId]) => { if (itemId) locks[slot] = itemId; });
