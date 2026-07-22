@@ -97,35 +97,97 @@ export function insertIntoTop10(top10, entry) {
 // weapon/shield pairs, which can both draw the same item out of a shared
 // candidate pool (wearing one ring on both hands, or dual-wielding a
 // one-handed weapon against itself) even though only one copy exists.
-function hasDisallowedDuplicate(combo, limitedItemIds) {
-    if (!limitedItemIds || limitedItemIds.size === 0) return false;
-    const seen = new Set();
-    for (const slot of EQUIP_SLOTS) {
-        const item = combo[slot];
-        if (!item || !limitedItemIds.has(item.id)) continue;
-        if (seen.has(item.id)) return true;
-        seen.add(item.id);
+function isDisallowedPair(a, b, limitedItemIds) {
+    if (!a || !b || !limitedItemIds || limitedItemIds.size === 0) return false;
+    return a.id === b.id && limitedItemIds.has(a.id);
+}
+
+// Builds every valid (weapon, shield) pairing up front, rather than letting
+// cartesian() generate all pairings and reject the invalid ones after the
+// fact. That distinction matters: weapon/shield sit at the *front* of
+// EQUIP_SLOTS, and a Cartesian odometer varies its last dimension fastest -
+// so with candidatesPerSlot unlimited and a single-copy item that scores
+// well for both slots (e.g. a strong one-handed sword), every combo for the
+// *entire* rest of the search (every combination of every other slot) could
+// keep landing on that one invalid pairing before the odometer ever carries
+// into a different weapon/shield choice, stalling the leaderboard for a very
+// long time even though evaluated/total keeps ticking up. Building only the
+// valid pairs makes that structurally impossible instead of merely unlikely.
+// Also folds in the pre-existing two-handed-weapon/shield dedup (a
+// two-handed weapon always nulls the shield for stat purposes, per
+// statEngine.js's resolveEquipped - every shield candidate scores
+// identically, so only the first is worth keeping as a combo).
+function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemIds) {
+    const weapons = weaponCandidates.length > 0 ? weaponCandidates : [null];
+    const shields = shieldCandidates.length > 0 ? shieldCandidates : [null];
+    const pairs = [];
+    for (const weapon of weapons) {
+        const twoHanded = !!weapon && isTwohandWeapon(weapon);
+        for (const shield of shields) {
+            if (twoHanded && shield && shieldCandidates.length > 1 && shield !== shieldCandidates[0]) continue;
+            if (isDisallowedPair(weapon, shield, limitedItemIds)) continue;
+            pairs.push({ weapon, shield: twoHanded ? null : shield });
+        }
     }
-    return false;
+    return pairs;
 }
 
-export function countCombinations(candidateLists) {
-    return EQUIP_SLOTS.reduce((product, slot) => product * Math.max(1, (candidateLists[slot] || []).length), 1);
+// Same idea as buildWeaponShieldPairs, for the ring slots.
+function buildRingPairs(leftCandidates, rightCandidates, limitedItemIds) {
+    const lefts = leftCandidates.length > 0 ? leftCandidates : [null];
+    const rights = rightCandidates.length > 0 ? rightCandidates : [null];
+    const pairs = [];
+    for (const leftring of lefts) {
+        for (const rightring of rights) {
+            if (isDisallowedPair(leftring, rightring, limitedItemIds)) continue;
+            pairs.push({ leftring, rightring });
+        }
+    }
+    return pairs;
 }
 
-function* cartesian(candidateLists) {
-    const slots = EQUIP_SLOTS.filter(slot => (candidateLists[slot] || []).length > 0);
-    const indices = slots.map(() => 0);
-    if (slots.some(slot => candidateLists[slot].length === 0)) return;
+const SINGLE_SLOTS = ['head', 'body', 'hand', 'feet', 'neck'];
+
+// One "dimension" per independent choice the search makes: the weapon+shield
+// pair, one per remaining simple slot (skipped entirely if empty, so it never
+// contributes a combinatorial factor), and the ring pair. Each dimension's
+// values are either a single-slot object ({ [slot]: item }) or a pre-merged
+// pair object ({ weapon, shield } / { leftring, rightring }) - cartesian()
+// doesn't need to know which.
+function buildDimensions(candidateLists, limitedItemIds) {
+    const dims = [{ values: buildWeaponShieldPairs(candidateLists.weapon || [], candidateLists.shield || [], limitedItemIds) }];
+    for (const slot of SINGLE_SLOTS) {
+        const list = candidateLists[slot] || [];
+        if (list.length === 0) continue;
+        dims.push({ values: list.map(item => ({ [slot]: item })) });
+    }
+    dims.push({ values: buildRingPairs(candidateLists.leftring || [], candidateLists.rightring || [], limitedItemIds) });
+    return dims;
+}
+
+// dims can include an empty pair dimension (buildWeaponShieldPairs/
+// buildRingPairs return []) only when every possible pairing for that slot
+// pair is disallowed - a genuinely impossible configuration, not "no item
+// equipped" (which is already represented as a { weapon: null, ... } entry
+// within a non-empty list) - so unlike single slots, an empty pair dimension
+// correctly makes the total (and the search) zero rather than one.
+export function countCombinations(candidateLists, limitedItemIds) {
+    return buildDimensions(candidateLists, limitedItemIds).reduce((product, d) => product * d.values.length, 1);
+}
+
+function* cartesian(candidateLists, limitedItemIds) {
+    const dims = buildDimensions(candidateLists, limitedItemIds);
+    const indices = dims.map(() => 0);
+    if (dims.some(d => d.values.length === 0)) return;
     while (true) {
         const combo = {};
-        slots.forEach((slot, i) => { combo[slot] = candidateLists[slot][indices[i]]; });
+        dims.forEach((d, i) => Object.assign(combo, d.values[indices[i]]));
         yield combo;
 
-        let pos = slots.length - 1;
+        let pos = dims.length - 1;
         while (pos >= 0) {
             indices[pos]++;
-            if (indices[pos] < candidateLists[slots[pos]].length) break;
+            if (indices[pos] < dims[pos].values.length) break;
             indices[pos] = 0;
             pos--;
         }
@@ -135,18 +197,9 @@ function* cartesian(candidateLists) {
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
     const { maxHpLossPerKill, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000 } = options;
-    const total = countCombinations(candidateLists);
+    const total = countCombinations(candidateLists, limitedItemIds);
     let top10 = [];
     let evaluated = 0;
-
-    // Shield choice only affects scoring when the weapon isn't two-handed. If the
-    // (possibly mixed) weapon candidate pool includes a two-handed weapon, cartesian()
-    // still independently pairs it with every shield candidate - resolvePlayerStats
-    // nulls the shield for all of them alike, so only the first is worth evaluating;
-    // the rest are skipped rather than filling the leaderboard with cosmetic
-    // duplicates. Locked shields (candidateLists.shield.length <= 1) have nothing to
-    // dedupe against, so they're left alone.
-    const shieldCandidates = candidateLists.shield || [];
 
     // Advances the evaluated counter and periodically yields/reports progress.
     // Returns true if the caller should stop (search was cancelled).
@@ -160,20 +213,13 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
         return false;
     };
 
-    for (const combo of cartesian(candidateLists)) {
-        const twoHanded = combo.weapon && isTwohandWeapon(combo.weapon);
-        if (twoHanded && combo.shield && shieldCandidates.length > 1 && combo.shield !== shieldCandidates[0]) {
-            if (await tick()) return top10;
-            continue;
-        }
-        if (hasDisallowedDuplicate(combo, limitedItemIds)) {
-            if (await tick()) return top10;
-            continue;
-        }
-
+    // Every combo cartesian() yields here is already a valid pairing (two-
+    // handed-weapon/shield dedup and the limit-1 constraint are both baked
+    // into buildDimensions), so there's nothing left to reject - every
+    // iteration goes straight to scoring.
+    for (const combo of cartesian(candidateLists, limitedItemIds)) {
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
-        if (twoHanded) equipment.shield = null;
         const candidateBuild = { ...build, equipment };
         const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById });
 
