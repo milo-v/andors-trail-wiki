@@ -76,8 +76,18 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
     return result;
 }
 
+// Primary: lower hpLossPerKill wins (survivability first). Secondary:
+// higher damagePerTurn breaks ties. hpLossPerKill can be Infinity (can't
+// kill the monster at all, per combatMath.js) - compare for equality before
+// subtracting so two Infinity entries don't produce a NaN comparator result
+// and fall through to the damagePerTurn tiebreak instead.
 export function insertIntoTop10(top10, entry) {
-    const next = [...top10, entry].sort((a, b) => b.summary.damagePerTurn - a.summary.damagePerTurn);
+    const next = [...top10, entry].sort((a, b) => {
+        const { hpLossPerKill: hpA, damagePerTurn: dptA } = a.summary;
+        const { hpLossPerKill: hpB, damagePerTurn: dptB } = b.summary;
+        if (hpA !== hpB) return hpA - hpB;
+        return dptB - dptA;
+    });
     return next.slice(0, 10);
 }
 
