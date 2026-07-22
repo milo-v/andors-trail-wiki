@@ -30,7 +30,7 @@ const styles = {
     statList: { margin: '0 0 8px 0', padding: 0, listStyle: 'none', fontSize: '0.9em' },
 };
 
-export default function ItemStatsCard({ item, top, left, onExclude, onClose }) {
+export default function ItemStatsCard({ item, top, left, onExclude, onLimit, onClose }) {
     if (!item) return null;
 
     const equipEffect = item.equipEffect || {};
@@ -58,6 +58,8 @@ export default function ItemStatsCard({ item, top, left, onExclude, onClose }) {
                     ? <ul style={styles.statList}>{stats}</ul>
                     : <p style={styles.statList}>No equip effects.</p>}
                 <button type="button" onClick={onExclude}>Add to exclude list</button>
+                {' '}
+                <button type="button" onClick={onLimit}>Limit to 1 copy</button>
             </div>
         </React.Fragment>
     );

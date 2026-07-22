@@ -12,12 +12,13 @@ self.onmessage = async (event) => {
     if (type !== 'start') return;
 
     cancelled = false;
-    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot } = event.data;
+    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot, limitedItemIds } = event.data;
     const items = Object.values(itemsById);
     const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot);
 
     const top10 = await searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, {
         maxHpLossPerKill,
+        limitedItemIds: limitedItemIds ? new Set(limitedItemIds) : null,
         onProgress: ({ evaluated, total, top10 }) => {
             self.postMessage({ type: 'progress', evaluated, total, top10 });
         },
