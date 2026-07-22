@@ -44,6 +44,7 @@ export default class OptimizerPanel extends Component {
             limitedItemIds: [],
             maxHpLossPerKill: '',
             running: false,
+            error: null,
             evaluated: 0,
             total: 0,
             top10: [],
@@ -137,19 +138,37 @@ export default class OptimizerPanel extends Component {
         this.terminateWorker();
         this.worker = new Worker(new URL('../../workers/optimizerWorker.js', import.meta.url));
         this.worker.onmessage = (event) => {
-            const { type, evaluated, total, top10 } = event.data;
+            const { type, evaluated, total, top10, message } = event.data;
             if (type === 'progress') {
                 this.setState({ evaluated, total, top10 });
             } else if (type === 'done') {
                 this.setState({ running: false, top10 });
                 this.terminateWorker();
+            } else if (type === 'error') {
+                this.setState({ running: false, error: message });
+                this.terminateWorker();
             }
         };
-        this.setState({ running: true, evaluated: 0, total: 0, top10: [] });
-        this.worker.postMessage({
-            type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot,
-            limitedItemIds: this.state.limitedItemIds,
-        });
+        // Runtime errors thrown inside the worker's own event loop (as opposed
+        // to a rejected promise, which optimizerWorker.js's try/catch already
+        // turns into an 'error' message above) surface here instead.
+        this.worker.onerror = (event) => {
+            this.setState({ running: false, error: event.message || 'Optimizer worker crashed' });
+            this.terminateWorker();
+        };
+        this.setState({ running: true, evaluated: 0, total: 0, top10: [], error: null });
+        try {
+            this.worker.postMessage({
+                type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot,
+                limitedItemIds: this.state.limitedItemIds,
+            });
+        } catch (err) {
+            // Most likely a DataCloneError - some field on the monster/items/build
+            // isn't structured-clonable (a raw XML-parser node, a function, etc.)
+            // and postMessage throws synchronously before the worker ever runs.
+            this.setState({ running: false, error: err.message || 'Failed to start optimizer' });
+            this.terminateWorker();
+        }
     }
 
     cancel() {
@@ -161,7 +180,7 @@ export default class OptimizerPanel extends Component {
         const { items, monster, onApplyBuild } = this.props;
         const {
             locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
-            maxHpLossPerKill, running, evaluated, total, top10, cardItem, cardPosition,
+            maxHpLossPerKill, running, error, evaluated, total, top10, cardItem, cardPosition,
         } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
@@ -271,6 +290,9 @@ export default class OptimizerPanel extends Component {
                 </div>
                 <button disabled={!monster || running} onClick={() => this.run()}>Run optimizer</button>
                 {running && <button onClick={() => this.cancel()}>Cancel</button>}
+                {error && (
+                    <div style={{ marginTop: 8, color: '#e05555' }}>Optimizer failed: {error}</div>
+                )}
                 {(running || total > 0) && (
                     <div style={{ marginTop: 8 }}>
                         <div style={{ background: '#333', height: 8, width: 300 }}>
