@@ -12,9 +12,9 @@ self.onmessage = async (event) => {
     if (type !== 'start') return;
 
     cancelled = false;
-    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill } = event.data;
+    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot } = event.data;
     const items = Object.values(itemsById);
-    const candidateLists = buildCandidateLists(items, locks, filtersBySlot);
+    const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot);
 
     const top10 = await searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, {
         maxHpLossPerKill,

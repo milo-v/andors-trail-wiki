@@ -5,6 +5,7 @@ import Icon from '../Icon';
 import ItemStatsCard from './ItemStatsCard';
 import { getItemsForSlot } from './buildHelpers';
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
+import { DEFAULT_CANDIDATES_PER_SLOT } from '../../utils/combat/optimizer';
 
 const SLOT_LABELS = {
     weapon: 'Weapon', shield: 'Shield/Off-hand', head: 'Head', body: 'Body', hand: 'Hand',
@@ -36,6 +37,8 @@ export default class OptimizerPanel extends Component {
         this.state = {
             locks: {},
             maxItemLevel: '',
+            candidatesPerSlot: String(DEFAULT_CANDIDATES_PER_SLOT),
+            unlimitedCandidates: false,
             categoryFilters: {},
             excludedItemIds: [],
             maxHpLossPerKill: '',
@@ -114,6 +117,9 @@ export default class OptimizerPanel extends Component {
         });
 
         const maxHpLossPerKill = this.state.maxHpLossPerKill === '' ? undefined : Number(this.state.maxHpLossPerKill);
+        const candidatesPerSlot = this.state.unlimitedCandidates
+            ? null
+            : Math.max(1, Number(this.state.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
 
         this.terminateWorker();
         this.worker = new Worker(new URL('../../workers/optimizerWorker.js', import.meta.url));
@@ -128,7 +134,7 @@ export default class OptimizerPanel extends Component {
         };
         this.setState({ running: true, evaluated: 0, total: 0, top10: [] });
         this.worker.postMessage({
-            type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill,
+            type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot,
         });
     }
 
@@ -139,7 +145,10 @@ export default class OptimizerPanel extends Component {
 
     render() {
         const { items, monster, onApplyBuild } = this.props;
-        const { locks, maxItemLevel, categoryFilters, excludedItemIds, maxHpLossPerKill, running, evaluated, total, top10, cardItem, cardPosition } = this.state;
+        const {
+            locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds,
+            maxHpLossPerKill, running, evaluated, total, top10, cardItem, cardPosition,
+        } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
@@ -189,6 +198,16 @@ export default class OptimizerPanel extends Component {
                     <label style={{ display: 'inline-block', width: 140 }}>Max item level</label>
                     <input type="number" step="5" value={maxItemLevel}
                         onChange={e => this.setState({ maxItemLevel: e.target.value })} placeholder="No cap" />
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                    <label style={{ display: 'inline-block', width: 140 }}>Candidates per slot</label>
+                    <input type="number" min="1" step="1" value={candidatesPerSlot} disabled={unlimitedCandidates}
+                        onChange={e => this.setState({ candidatesPerSlot: e.target.value })} />
+                    <label style={{ marginLeft: 10 }}>
+                        <input type="checkbox" checked={unlimitedCandidates}
+                            onChange={e => this.setState({ unlimitedCandidates: e.target.checked })} />
+                        {' '}Unlimited
+                    </label>
                 </div>
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140, verticalAlign: 'top' }}>Excluded items</label>
