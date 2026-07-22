@@ -136,9 +136,12 @@ function applyDualWield(stats, mainHand, offHand, skillLevels, weaponDamage) {
 
     const offhandProfSkill = getProficiencySkillForCategory(offHand.categoryLink);
     const offhandProfLevel = offhandProfSkill ? skillLevels[offhandProfSkill] || 0 : 0;
-    stats.attackChance += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_AC_PERCENT * offhandProfLevel, percent, 0);
-    stats.blockChance += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_BC_PERCENT * offhandProfLevel, percent, 0);
-    stats.criticalSkill += getPercentage(SKILL_CONSTANTS.WEAPON_PROF_CS_PERCENT * offhandProfLevel, percent, 0);
+    const offhandProfAC = getPercentage(offHand.equipEffect.increaseAttackChance || 0, SKILL_CONSTANTS.WEAPON_PROF_AC_PERCENT * offhandProfLevel, 0);
+    const offhandProfBC = getPercentage(offHand.equipEffect.increaseBlockChance || 0, SKILL_CONSTANTS.WEAPON_PROF_BC_PERCENT * offhandProfLevel, 0);
+    const offhandProfCS = getPercentage(offHand.equipEffect.increaseCriticalSkill || 0, SKILL_CONSTANTS.WEAPON_PROF_CS_PERCENT * offhandProfLevel, 0);
+    stats.attackChance += getPercentage(offhandProfAC, percent, 0);
+    stats.blockChance += getPercentage(offhandProfBC, percent, 0);
+    stats.criticalSkill += getPercentage(offhandProfCS, percent, 0);
 
     const e = offHand.equipEffect;
     stats.attackChance += getPercentage(e.increaseAttackChance || 0, percent, 100);
