@@ -37,9 +37,11 @@ export function computeDefenseVector(item) {
     ];
 }
 
-// Items with proc-based effects have real value these flat-stat vectors can't
-// represent (proc chance * granted condition's effect) - always keep them as
-// candidates rather than let them get pruned on raw stats alone.
+// Items with proc-based effects, or an on-equip condition (e.g. Ortholion's
+// talisman's fear immunity, a ring's self-inflicted debuff tradeoff), have
+// real value these flat-stat vectors can't represent (proc chance/condition
+// effect isn't a vector dimension) - always keep them as candidates rather
+// than let them get pruned on raw stats alone.
 export function isExemptItem(item) {
     return !!(
         item?.hitEffect ||
@@ -47,7 +49,8 @@ export function isExemptItem(item) {
         item?.useEffect ||
         item?.missEffect ||
         item?.hitReceivedEffect ||
-        item?.missReceivedEffect
+        item?.missReceivedEffect ||
+        item?.equipEffect?.addedConditions?.length
     );
 }
 

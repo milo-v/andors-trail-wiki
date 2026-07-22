@@ -16,10 +16,23 @@ export function combinedScore(item) {
     return 0.6 * sum(computeOffenseVector(item)) + 0.4 * sum(computeDefenseVector(item));
 }
 
-export const CANDIDATES_PER_SLOT = 6;
+export const DEFAULT_CANDIDATES_PER_SLOT = 6;
+
+// Best-first ordering for a slot's pool: combinedScore is the primary signal,
+// item level (a power-tier signal the flat-stat vectors don't capture, e.g.
+// two items scoring equally but one being a much higher-level drop) breaks
+// ties. This is also the traversal order cartesian() walks a slot's list in,
+// so it doubles as "evaluate the most promising combos first" - useful when
+// candidatesPerSlot is unlimited and the search may be cancelled before it
+// finishes.
+function compareCandidates(a, b) {
+    const scoreDiff = combinedScore(b) - combinedScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
+}
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryIds, excludedItemIds } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -33,10 +46,15 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
-    return [...pool].sort((a, b) => combinedScore(b) - combinedScore(a)).slice(0, CANDIDATES_PER_SLOT);
+    const sorted = [...pool].sort(compareCandidates);
+    // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
+    // above (6) applies whenever the caller doesn't specify one at all.
+    return candidatesPerSlot == null || candidatesPerSlot === Infinity
+        ? sorted
+        : sorted.slice(0, candidatesPerSlot);
 }
 
-export function buildCandidateLists(items, locks, filtersBySlot = {}) {
+export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
     const result = {};
     for (const slot of EQUIP_SLOTS) {
@@ -45,7 +63,7 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}) {
             const lockedItem = itemsById[lockedId];
             result[slot] = lockedItem ? [lockedItem] : [];
         } else {
-            result[slot] = selectCandidates(slot, items, filtersBySlot[slot] || {});
+            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot });
         }
     }
     // A two-handed weapon forces the shield slot empty for stat purposes
