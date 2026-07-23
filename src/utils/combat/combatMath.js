@@ -77,8 +77,16 @@ export function getAverageDamagePerTurn(attacker, target) {
     return getAverageDamagePerHit(attacker, target) * getAttacksPerTurn(attacker);
 }
 
-// CombatController.java:550-560.
+// CombatController.java:550-560. attacksPerTurn <= 0 (attackCost exceeds
+// maxAP - the game resets AP to max every turn with no carryover, so this
+// weapon can *never* be swung, not just "swung rarely") is a structurally
+// different kind of impossible than "attacks land but deal ≤0 net damage" -
+// the latter still uses the game's own 100-turn fallback, but the former
+// needs the same 999 sentinel as the other impossible cases below it, or a
+// build that can't attack at all reports a finite, plausible-looking
+// hpLossPerKill instead of correctly sorting to the bottom as unusable.
 export function getTurnsToKillTarget(attacker, target) {
+    if (getAttacksPerTurn(attacker) <= 0) return 999;
     if (hasCriticalAttack(attacker, target)) {
         if (attacker.damagePotential.max * attacker.criticalMultiplier <= target.damageResistance) return 999;
     } else {
