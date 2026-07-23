@@ -3,7 +3,7 @@
 // No RNG: every value here is a closed-form expected value, matching the game's
 // own implementation.
 
-import { resolvePlayerStats, resolveMonsterStats } from './statEngine';
+import { resolvePlayerStats, resolveMonsterStats, resolveEquipped, EQUIP_SLOTS } from './statEngine';
 import { SKILL_IDS, SKILL_CONSTANTS } from './skillData';
 
 export function getAttacksPerTurn(stats) {
@@ -128,10 +128,40 @@ function getExpectedConditionHPPerRound(activeConditions, conditionsById) {
     return total;
 }
 
+function averageRange(range) {
+    if (!range) return 0;
+    return ((range.min || 0) + (range.max || 0)) / 2;
+}
+
+// Expected HP restored per turn from equipped items' hitEffect - fires on
+// every *successful* hit (CombatController.attack() rolls the hit chance
+// before calling applyAttackHitStatusEffects; a miss uses a separate
+// missEffect path this doesn't model), so it scales by hit chance and
+// attacks/turn same as damage itself does.
+function getExpectedHitEffectHPPerTurn(equipped, hitChance, attacksPerTurn) {
+    let total = 0;
+    for (const slot of EQUIP_SLOTS) {
+        total += averageRange(equipped[slot]?.hitEffect?.increaseCurrentHP);
+    }
+    return total * (hitChance / 100) * attacksPerTurn;
+}
+
+// Expected HP restored per kill from equipped items' killEffect -
+// ActorStatsController.applyKillEffectsToPlayer fires once per kill,
+// independent of the Eater skill's own flat per-kill restore.
+function getExpectedKillEffectHP(equipped) {
+    let total = 0;
+    for (const slot of EQUIP_SLOTS) {
+        total += averageRange(equipped[slot]?.killEffect?.increaseCurrentHP);
+    }
+    return total;
+}
+
 // Builds the full set of calculator outputs for one player build vs one monster.
 export function computeCombatSummary(build, monster, { itemsById, conditionsById }) {
     const player = resolvePlayerStats(build, { itemsById, conditionsById });
     const target = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+    const equipped = resolveEquipped(build.equipment, itemsById);
 
     const difficulty = getMonsterDifficulty(player, target);
     const difficultyLabel = getDifficultyLabel(difficulty);
@@ -141,14 +171,16 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     const turnsToKillMonster = getTurnsToKillTarget(player, target);
 
     const regenPerTurn = getExpectedConditionHPPerRound(build.activeConditions, conditionsById);
-    const hpGainPerTurn = regenPerTurn;
+    const hitEffectPerTurn = getExpectedHitEffectHPPerTurn(equipped, getAttackHitChance(player, target), getAttacksPerTurn(player));
+    const hpGainPerTurn = regenPerTurn + hitEffectPerTurn;
 
     const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
 
-    // Eater skill + any item killEffect HP restores are flat, deterministic
-    // per-kill bonuses (not expected values), per CombatController.playerKilledMonster.
+    // Eater skill's per-kill restore is a flat, deterministic bonus; item
+    // killEffect HP restores are an expected value (min-max roll), per
+    // ActorStatsController.applyKillEffectsToPlayer/applyUseEffect.
     const eaterLevel = build.skillLevels[SKILL_IDS.EATER] || 0;
-    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH;
+    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH + getExpectedKillEffectHP(equipped);
 
     return {
         difficulty,

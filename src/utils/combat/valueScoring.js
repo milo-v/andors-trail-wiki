@@ -25,15 +25,29 @@ export function computeOffenseVector(item) {
     ];
 }
 
-// Vector dimension order: [blockChance, damageResistance, maxHP, maxAP].
+function averageRange(range) {
+    if (!range) return 0;
+    return ((range.min || 0) + (range.max || 0)) / 2;
+}
+
+// Vector dimension order: [blockChance, damageResistance, maxHP, maxAP,
+// hitEffect HP recovery, killEffect HP recovery]. The last two fold in items
+// like Necklace of the Undead, whose real value is almost entirely in
+// per-hit/per-kill HP recovery (CombatController.applyAttackHitStatusEffects/
+// ActorStatsController.applyKillEffectsToPlayer) rather than its modest flat
+// equipEffect - without this, such items score too low on raw stats alone to
+// ever surface as optimizer candidates. Other on-hit/on-kill effects (chance-
+// based condition procs, AP restores) aren't folded in here - their value
+// isn't a single comparable number the way a flat HP average is.
 export function computeDefenseVector(item) {
     const e = item?.equipEffect;
-    if (!e) return [0, 0, 0, 0];
     return [
-        e.increaseBlockChance || 0,
-        e.increaseDamageResistance || 0,
-        e.increaseMaxHP || 0,
-        e.increaseMaxAP || 0,
+        e?.increaseBlockChance || 0,
+        e?.increaseDamageResistance || 0,
+        e?.increaseMaxHP || 0,
+        e?.increaseMaxAP || 0,
+        averageRange(item?.hitEffect?.increaseCurrentHP),
+        averageRange(item?.killEffect?.increaseCurrentHP),
     ];
 }
 
