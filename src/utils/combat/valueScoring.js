@@ -104,12 +104,19 @@ function scoreProcConditions(entries, conditionsById, isEnemyEffect) {
     return { offense, defense };
 }
 
-// Folds an item's chance-based condition procs (hitEffect/killEffect/
-// hitReceivedEffect conditionsSource/conditionsTarget) into offense/defense
-// vector deltas. conditionsById is required to look up each proc's
-// abilityEffect; omit it (e.g. call sites that don't have it handy) and
-// these contributions are simply skipped, matching the pre-existing
-// direct-stat-only scoring.
+function vectorSum(v) {
+    return v.reduce((a, b) => a + b, 0);
+}
+
+// Same 0.6/0.4 offense/defense weighting optimizer.js's combinedScore uses,
+// applied to a single condition's own abilityEffect (per unit magnitude) to
+// classify it as a net buff or net debuff for the amortization below.
+export function isNetNegativeCondition(condition) {
+    if (!condition?.abilityEffect) return false;
+    const net = 0.6 * vectorSum(abilityEffectAsOffenseVector(condition.abilityEffect)) + 0.4 * vectorSum(abilityEffectAsDefenseVector(condition.abilityEffect));
+    return net < 0;
+}
+
 // Permanent, always-on conditions an item inflicts on its own wearer while
 // equipped (equipEffect.addedConditions - ActorStatsController.java's
 // addConditionsFromEquippedItem, e.g. Feline Gloves' self-inflicted
@@ -118,19 +125,43 @@ function scoreProcConditions(entries, conditionsById, isEnemyEffect) {
 // magnitude itself is the full weight, mirroring statEngine.js's
 // applyActiveConditions (magnitude <= 0 means "grants immunity", not an
 // inverted effect).
-export function computeEquipConditionVectors(item, conditionsById) {
+//
+// A net-negative condition's penalty gets amortized across
+// sharedConditionSlotCounts[conditionId] (optimizer.js's
+// computeSharedNegativeConditionSlotCounts) - the number of distinct equip
+// slots that have *some* item inflicting this same non-stacking debuff.
+// ActorStatsController's non-stacking merge means wearing two such items
+// never actually doubles the cost (only the strongest instance applies), so
+// scoring each one at full penalty is too pessimistic whenever a different
+// slot could just as easily bring the same debuff on its own. Net-positive
+// conditions get no such discount - full credit every time, since
+// over-crediting a shared buff isn't the problem being corrected for.
+export function computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts) {
     let offense = [0, 0, 0, 0, 0, 0, 0];
     let defense = [0, 0, 0, 0, 0, 0, 0];
     if (!conditionsById) return { offense, defense };
     for (const entry of item?.equipEffect?.addedConditions || []) {
         const condition = conditionsById[entry.condition];
         if (!condition?.abilityEffect || !entry.magnitude || entry.magnitude <= 0) continue;
-        offense = addVectors(offense, scaleVector(abilityEffectAsOffenseVector(condition.abilityEffect), entry.magnitude));
-        defense = addVectors(defense, scaleVector(abilityEffectAsDefenseVector(condition.abilityEffect), entry.magnitude));
+        const offVec = abilityEffectAsOffenseVector(condition.abilityEffect);
+        const defVec = abilityEffectAsDefenseVector(condition.abilityEffect);
+        let weight = entry.magnitude;
+        if (isNetNegativeCondition(condition)) {
+            const slotCount = sharedConditionSlotCounts?.[entry.condition] || 1;
+            weight = entry.magnitude / slotCount;
+        }
+        offense = addVectors(offense, scaleVector(offVec, weight));
+        defense = addVectors(defense, scaleVector(defVec, weight));
     }
     return { offense, defense };
 }
 
+// Folds an item's chance-based condition procs (hitEffect/killEffect/
+// hitReceivedEffect conditionsSource/conditionsTarget) into offense/defense
+// vector deltas. conditionsById is required to look up each proc's
+// abilityEffect; omit it (e.g. call sites that don't have it handy) and
+// these contributions are simply skipped, matching the pre-existing
+// direct-stat-only scoring.
 export function computeProcConditionVectors(item, conditionsById) {
     if (!conditionsById) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
     const parts = [

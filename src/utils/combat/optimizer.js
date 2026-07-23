@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors } from './valueScoring';
+import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon } from './statEngine';
@@ -15,13 +15,39 @@ function sum(vector) {
 // estimate, consistent with Phase C's stance of not running real combat
 // formulas at scoring time (see valueScoring.js's header comment), plus the
 // permanent equip-granted condition (equipEffect.addedConditions, e.g. Feline
-// Gloves' self-inflicted Clumsiness) at full weight since it's always active.
-export function combinedScore(item, conditionsById) {
+// Gloves' self-inflicted Clumsiness). sharedConditionSlotCounts (optional)
+// amortizes a net-negative condition's penalty across however many distinct
+// slots could bring the same non-stacking debuff - see valueScoring.js's
+// computeEquipConditionVectors for why.
+export function combinedScore(item, conditionsById, sharedConditionSlotCounts) {
     const procVectors = computeProcConditionVectors(item, conditionsById);
-    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById);
+    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
     const offense = sum(computeOffenseVector(item)) + sum(procVectors.offense) + sum(equipConditionVectors.offense);
     const defense = sum(computeDefenseVector(item)) + sum(procVectors.defense) + sum(equipConditionVectors.defense);
     return 0.6 * offense + 0.4 * defense;
+}
+
+// Counts, per conditionId, how many distinct equip slots (categoryLink.
+// inventorySlot) have at least one item that inflicts that condition as a
+// net-negative equipEffect.addedConditions entry. Computed once from the
+// full item pool (not just one slot's candidates) since the whole point is
+// to notice cross-slot redundancy before per-slot pruning ever happens.
+function computeSharedNegativeConditionSlotCounts(items, conditionsById) {
+    if (!conditionsById) return {};
+    const slotsByCondition = new Map();
+    for (const item of items) {
+        const slot = item.categoryLink?.inventorySlot;
+        if (!slot) continue;
+        for (const entry of item.equipEffect?.addedConditions || []) {
+            if (!entry.magnitude || entry.magnitude <= 0) continue;
+            if (!isNetNegativeCondition(conditionsById[entry.condition])) continue;
+            if (!slotsByCondition.has(entry.condition)) slotsByCondition.set(entry.condition, new Set());
+            slotsByCondition.get(entry.condition).add(slot);
+        }
+    }
+    const counts = {};
+    for (const [conditionId, slots] of slotsByCondition) counts[conditionId] = slots.size;
+    return counts;
 }
 
 export const DEFAULT_CANDIDATES_PER_SLOT = 6;
@@ -33,14 +59,14 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // so it doubles as "evaluate the most promising combos first" - useful when
 // candidatesPerSlot is unlimited and the search may be cancelled before it
 // finishes.
-function compareCandidates(a, b, conditionsById) {
-    const scoreDiff = combinedScore(b, conditionsById) - combinedScore(a, conditionsById);
+function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts) {
+    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts) - combinedScore(a, conditionsById, sharedConditionSlotCounts);
     if (scoreDiff !== 0) return scoreDiff;
     return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
 }
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById, sharedConditionSlotCounts } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -54,7 +80,7 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
-    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById));
+    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts));
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
     return candidatesPerSlot == null || candidatesPerSlot === Infinity
@@ -64,6 +90,7 @@ export function selectCandidates(slot, items, options = {}) {
 
 export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
+    const sharedConditionSlotCounts = computeSharedNegativeConditionSlotCounts(items, conditionsById);
     const result = {};
     for (const slot of EQUIP_SLOTS) {
         const lockedId = locks[slot];
@@ -71,7 +98,7 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
             const lockedItem = itemsById[lockedId];
             result[slot] = lockedItem ? [lockedItem] : [];
         } else {
-            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById });
+            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById, sharedConditionSlotCounts });
         }
     }
     // A two-handed weapon forces the shield slot empty for stat purposes
