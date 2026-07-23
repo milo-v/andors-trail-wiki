@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector } from './valueScoring';
+import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon } from './statEngine';
@@ -8,12 +8,17 @@ function sum(vector) {
     return vector.reduce((a, b) => a + b, 0);
 }
 
-// Proc-effect items (hitEffect/killEffect/etc.) are scored identically to
-// everything else - their proc value isn't representable in the flat-stat
-// vectors, consistent with Phase C's stance (valueScoring.js). A proc item
-// only makes the candidate list if its flat stats are already competitive.
-export function combinedScore(item) {
-    return 0.6 * sum(computeOffenseVector(item)) + 0.4 * sum(computeDefenseVector(item));
+// Direct hitEffect/killEffect/hitReceivedEffect HP recovery and reflect
+// damage are already folded into computeOffenseVector/computeDefenseVector.
+// conditionsById (optional - omitted call sites just skip this term) adds
+// the chance-based condition procs on top via valueScoring's proxy-occupancy
+// estimate, consistent with Phase C's stance of not running real combat
+// formulas at scoring time (see valueScoring.js's header comment).
+export function combinedScore(item, conditionsById) {
+    const procVectors = computeProcConditionVectors(item, conditionsById);
+    const offense = sum(computeOffenseVector(item)) + sum(procVectors.offense);
+    const defense = sum(computeDefenseVector(item)) + sum(procVectors.defense);
+    return 0.6 * offense + 0.4 * defense;
 }
 
 export const DEFAULT_CANDIDATES_PER_SLOT = 6;
@@ -25,14 +30,14 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // so it doubles as "evaluate the most promising combos first" - useful when
 // candidatesPerSlot is unlimited and the search may be cancelled before it
 // finishes.
-function compareCandidates(a, b) {
-    const scoreDiff = combinedScore(b) - combinedScore(a);
+function compareCandidates(a, b, conditionsById) {
+    const scoreDiff = combinedScore(b, conditionsById) - combinedScore(a, conditionsById);
     if (scoreDiff !== 0) return scoreDiff;
     return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
 }
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -46,7 +51,7 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
-    const sorted = [...pool].sort(compareCandidates);
+    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById));
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
     return candidatesPerSlot == null || candidatesPerSlot === Infinity
@@ -54,7 +59,7 @@ export function selectCandidates(slot, items, options = {}) {
         : sorted.slice(0, candidatesPerSlot);
 }
 
-export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot) {
+export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
     const result = {};
     for (const slot of EQUIP_SLOTS) {
@@ -63,7 +68,7 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
             const lockedItem = itemsById[lockedId];
             result[slot] = lockedItem ? [lockedItem] : [];
         } else {
-            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot });
+            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById });
         }
     }
     // A two-handed weapon forces the shield slot empty for stat purposes

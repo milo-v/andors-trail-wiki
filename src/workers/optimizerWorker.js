@@ -20,7 +20,7 @@ self.onmessage = async (event) => {
     // forever with no indication anything went wrong.
     try {
         const items = Object.values(itemsById);
-        const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot);
+        const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot, conditionsById);
 
         const top10 = await searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, {
             maxHpLossPerKill,
