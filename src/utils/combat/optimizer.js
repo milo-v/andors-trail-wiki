@@ -48,10 +48,9 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // Best-first ordering for a slot's pool: combinedScore is the primary signal,
 // item level (a power-tier signal the flat-stat vectors don't capture, e.g.
 // two items scoring equally but one being a much higher-level drop) breaks
-// ties. This is also the traversal order cartesian() walks a slot's list in,
-// so it doubles as "evaluate the most promising combos first" - useful when
-// candidatesPerSlot is unlimited and the search may be cancelled before it
-// finishes.
+// ties. This is also the per-dimension order bestFirstCombos() ranks each
+// slot's index by (0 = best), so it doubles as "evaluate the most promising
+// combos first" across every dimension - not just this one slot in isolation.
 function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
     const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) - combinedScore(a, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
     if (scoreDiff !== 0) return scoreDiff;
@@ -138,20 +137,20 @@ function isDisallowedPair(a, b, limitedItemIds) {
 }
 
 // Builds every valid (weapon, shield) pairing up front, rather than letting
-// cartesian() generate all pairings and reject the invalid ones after the
-// fact. That distinction matters: weapon/shield sit at the *front* of
-// EQUIP_SLOTS, and a Cartesian odometer varies its last dimension fastest -
-// so with candidatesPerSlot unlimited and a single-copy item that scores
-// well for both slots (e.g. a strong one-handed sword), every combo for the
-// *entire* rest of the search (every combination of every other slot) could
-// keep landing on that one invalid pairing before the odometer ever carries
-// into a different weapon/shield choice, stalling the leaderboard for a very
-// long time even though evaluated/total keeps ticking up. Building only the
-// valid pairs makes that structurally impossible instead of merely unlikely.
-// Also folds in the pre-existing two-handed-weapon/shield dedup (a
-// two-handed weapon always nulls the shield for stat purposes, per
-// statEngine.js's resolveEquipped - every shield candidate scores
-// identically, so only the first is worth keeping as a combo).
+// the traversal generate all pairings and reject the invalid ones after the
+// fact. That distinction matters regardless of traversal strategy - both the
+// original Cartesian-odometer walk and the current bestFirstCombos() search
+// trust every value in a dimension to already be valid and never re-check,
+// so an invalid pairing left in would either get wastefully evaluated or (in
+// the old odometer, whose last dimension varies fastest) could dominate the
+// *entire* rest of the search behind a single-copy item that scores well for
+// both slots, stalling the leaderboard for a long time even though
+// evaluated/total kept ticking up. Building only the valid pairs makes that
+// structurally impossible instead of merely unlikely. Also folds in the
+// pre-existing two-handed-weapon/shield dedup (a two-handed weapon always
+// nulls the shield for stat purposes, per statEngine.js's resolveEquipped -
+// every shield candidate scores identically, so only the first is worth
+// keeping as a combo).
 const ARMOR_LIKE_SLOTS = EQUIP_SLOTS.filter(slot => slot !== 'weapon' && slot !== 'shield');
 
 // Upper bound on maxAP this build could ever reach, using the actual
@@ -269,23 +268,98 @@ export function countCombinations(candidateLists, limitedItemIds, build) {
     return buildDimensions(candidateLists, limitedItemIds, build).reduce((product, d) => product * d.values.length, 1);
 }
 
-function* cartesian(candidateLists, limitedItemIds, build) {
+// Small binary max-heap (array-based) - JS has no built-in priority queue,
+// and bestFirstCombos() below can push/pop many thousands of entries on a
+// large or "unlimited" search, where a plain sorted-array insertion (O(n)
+// per push) would get slow; this keeps push/pop at O(log n).
+class MaxHeap {
+    constructor() {
+        this.items = [];
+    }
+    get size() {
+        return this.items.length;
+    }
+    push(priority, value) {
+        this.items.push({ priority, value });
+        let i = this.items.length - 1;
+        while (i > 0) {
+            const parent = (i - 1) >> 1;
+            if (this.items[parent].priority >= this.items[i].priority) break;
+            [this.items[parent], this.items[i]] = [this.items[i], this.items[parent]];
+            i = parent;
+        }
+    }
+    pop() {
+        const top = this.items[0];
+        const last = this.items.pop();
+        if (this.items.length > 0) {
+            this.items[0] = last;
+            let i = 0;
+            for (;;) {
+                const left = i * 2 + 1;
+                const right = i * 2 + 2;
+                let largest = i;
+                if (left < this.items.length && this.items[left].priority > this.items[largest].priority) largest = left;
+                if (right < this.items.length && this.items[right].priority > this.items[largest].priority) largest = right;
+                if (largest === i) break;
+                [this.items[i], this.items[largest]] = [this.items[largest], this.items[i]];
+                i = largest;
+            }
+        }
+        return top.value;
+    }
+}
+
+// Replaces a plain nested-loop (odometer) walk over `dims`, which varies the
+// *last* dimension fastest - it would exhaustively finish every combination
+// of every other dimension against the single best weapon+shield pairing
+// before ever trying the second-best one. Under "unlimited" candidatesPerSlot
+// that first pairing alone can be enough combos to never finish, so a weapon
+// that's #2 overall but pairs far better with the rest of the build would
+// never get a chance to surface.
+//
+// Instead, this is a best-first search over the same `dims`: each
+// dimension's `values` are already sorted best-to-worst (selectCandidates'
+// combinedScore sort), so a tuple of indices' "rank sum" (sum of each
+// dimension's own index, 0 = best) is a cheap, principled proxy for how
+// promising that combo is a priori - lower is better. Starting from the
+// all-best tuple, it repeatedly pops the lowest-rank-sum tuple not yet
+// visited, yields it, and pushes its neighbors (each dimension bumped by one
+// index in turn, skipping any already visited/enqueued). This is the
+// standard way to enumerate the top entries of a cross product of
+// independently-sorted lists (the same idea used for combining N-best lists
+// elsewhere, e.g. machine translation reranking) - it still eventually
+// visits every combo exactly once if left to run to completion (same total
+// as countCombinations), but interleaves across every dimension instead of
+// getting stuck varying just the fastest one.
+function* bestFirstCombos(candidateLists, limitedItemIds, build) {
     const dims = buildDimensions(candidateLists, limitedItemIds, build);
-    const indices = dims.map(() => 0);
     if (dims.some(d => d.values.length === 0)) return;
-    while (true) {
+
+    const rankSum = (indices) => indices.reduce((sum, idx) => sum + idx, 0);
+    const key = (indices) => indices.join(',');
+
+    const heap = new MaxHeap();
+    const visited = new Set();
+    const start = dims.map(() => 0);
+    heap.push(-rankSum(start), start);
+    visited.add(key(start));
+
+    while (heap.size > 0) {
+        const indices = heap.pop();
         const combo = {};
         dims.forEach((d, i) => Object.assign(combo, d.values[indices[i]]));
         yield combo;
 
-        let pos = dims.length - 1;
-        while (pos >= 0) {
-            indices[pos]++;
-            if (indices[pos] < dims[pos].values.length) break;
-            indices[pos] = 0;
-            pos--;
+        for (let i = 0; i < dims.length; i++) {
+            if (indices[i] + 1 >= dims[i].values.length) continue;
+            const next = indices.slice();
+            next[i]++;
+            const nextKey = key(next);
+            if (visited.has(nextKey)) continue;
+            visited.add(nextKey);
+            heap.push(-rankSum(next), next);
         }
-        if (pos < 0) return;
     }
 }
 
@@ -307,11 +381,11 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
         return false;
     };
 
-    // Every combo cartesian() yields here is already a valid pairing (two-
-    // handed-weapon/shield dedup and the limit-1 constraint are both baked
-    // into buildDimensions), so there's nothing left to reject - every
+    // Every combo bestFirstCombos() yields here is already a valid pairing
+    // (two-handed-weapon/shield dedup and the limit-1 constraint are both
+    // baked into buildDimensions), so there's nothing left to reject - every
     // iteration goes straight to scoring.
-    for (const combo of cartesian(candidateLists, limitedItemIds, build)) {
+    for (const combo of bestFirstCombos(candidateLists, limitedItemIds, build)) {
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
         const candidateBuild = { ...build, equipment };
