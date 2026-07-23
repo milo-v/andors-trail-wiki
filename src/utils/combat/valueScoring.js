@@ -77,6 +77,9 @@ export function scaleOffHandStats(vector, percent, scaledDimCount) {
     return vector.map((v, i) => (i < scaledDimCount ? (v * percent) / 100 : v));
 }
 
+const OFFENSE_SCALED_DIM_COUNT = 5;
+const DEFENSE_SCALED_DIM_COUNT = 4;
+
 function abilityEffectAsOffenseVector(effect) {
     const dmg = effect?.increaseAttackDamage || { min: 0, max: 0 };
     return [dmg.min || 0, dmg.max || 0, effect?.increaseAttackChance || 0, effect?.increaseCriticalSkill || 0, effect?.setCriticalMultiplier || 0, -(effect?.increaseAttackCost || 0), 0];
@@ -99,6 +102,27 @@ export function computeProficiencyVectors(item, slot, skillLevels) {
 
 function addVectors(a, b) {
     return a.map((v, i) => v + b[i]);
+}
+
+// Full context-adjusted offense/defense vectors combining every scoring
+// signal this file computes - base equip stats (off-hand-efficiency
+// scaled), chance-based condition procs, permanent equip-granted
+// conditions, and weapon/shield/armor proficiency + two-handed fighting
+// style. The single source of truth for both optimizer.js's combinedScore
+// (summed to a scalar for ranking) and pruneCandidates' Pareto-frontier
+// dominance checks below, so a pruning decision is always consistent with
+// how items actually get ranked.
+export function computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
+    const procVectors = computeProcConditionVectors(item, conditionsById);
+    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
+    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels);
+    const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
+    const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
+    const defenseVec = scaleOffHandStats(computeDefenseVector(item), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
+    return {
+        offense: addVectors(addVectors(offenseVec, procVectors.offense), addVectors(equipConditionVectors.offense, proficiencyVectors.offense)),
+        defense: addVectors(addVectors(defenseVec, procVectors.defense), addVectors(equipConditionVectors.defense, proficiencyVectors.defense)),
+    };
 }
 function scaleVector(v, s) {
     return v.map((x) => x * s);
@@ -215,21 +239,41 @@ export function computeProcConditionVectors(item, conditionsById) {
     };
 }
 
-// Items with proc-based effects, or an on-equip condition (e.g. Ortholion's
-// talisman's fear immunity, a ring's self-inflicted debuff tradeoff), have
-// real value these flat-stat vectors can't represent (proc chance/condition
-// effect isn't a vector dimension) - always keep them as candidates rather
-// than let them get pruned on raw stats alone.
-export function isExemptItem(item) {
-    return !!(
-        item?.hitEffect ||
-        item?.killEffect ||
-        item?.useEffect ||
-        item?.missEffect ||
-        item?.hitReceivedEffect ||
-        item?.missReceivedEffect ||
-        item?.equipEffect?.addedConditions?.length
-    );
+// Key-order- and array-order-independent JSON serialization, so two items
+// whose special effects are structurally identical (just authored/parsed
+// with entries or object keys in a different order) still produce the same
+// signature below rather than spuriously comparing as "different".
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).sort().join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+const EFFECT_FIELDS = ['hitEffect', 'killEffect', 'hitReceivedEffect', 'useEffect', 'missEffect', 'missReceivedEffect'];
+
+// Canonical representation of every special-effect field an item can carry
+// (proc effects plus equipEffect.addedConditions), for grouping "exact same
+// effects" items together in pruneCandidates. Two items with identical
+// special effects always contribute identical value to a build - whether or
+// not that value happens to be captured by the vectors above (e.g. a direct
+// hitEffect.increaseCurrentAP boost isn't currently vector-tracked at all) -
+// so comparing them on stats alone is always safe when their signatures
+// match exactly. Items with differing signatures (even a single differing
+// field) never land in the same pruning group and so never cross-compare,
+// preserving the old blanket-exemption's safety net for anything the
+// vectors don't (yet) capture.
+export function getEffectSignature(item) {
+    const parts = {};
+    for (const field of EFFECT_FIELDS) {
+        if (item?.[field]) parts[field] = item[field];
+    }
+    if (item?.equipEffect?.addedConditions?.length) parts.addedConditions = item.equipEffect.addedConditions;
+    return stableStringify(parts);
 }
 
 function dominates(a, b) {
@@ -249,31 +293,55 @@ export function paretoFrontier(candidates, vectorFn) {
     return candidates.filter((_, i) => !vectors.some((v, j) => j !== i && dominates(v, vectors[i])));
 }
 
-// Groups items by the proficiency skill they invest in (null key = no
-// proficiency track, e.g. rings/necklaces/cloth armor) - items in different
-// groups are never compared against each other.
-function groupByProficiency(items) {
+// Groups items by (proficiency-skill track, exact special-effect signature)
+// - items only ever compete against others in the exact same group. The
+// proficiency-track split (null key = no track, e.g. rings/necklaces/cloth
+// armor) keeps e.g. an off-hand dagger candidate from being compared against
+// an unrelated armor proficiency track's items. Within a track, items are
+// further split by getEffectSignature: items with a unique signature end up
+// alone in their own group (nothing to dominate them - the old exemption's
+// effect, achieved here as a natural consequence of grouping rather than a
+// special case), while items sharing the *exact same* signature (e.g. a
+// higher-tier reskin of the same proc'd item) do get compared.
+function groupForPruning(items) {
     const groups = new Map();
     for (const item of items) {
-        const key = getProficiencySkillForCategory(item.categoryLink);
+        const key = `${getProficiencySkillForCategory(item.categoryLink)}::${getEffectSignature(item)}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(item);
     }
     return [...groups.values()];
 }
 
-// Phase D's entry point: prune a slot's item candidates down to, per
-// proficiency-skill group, the offense-frontier union defense-frontier union
-// proc-exempt items.
-export function pruneCandidates(items) {
-    const exempt = items.filter(isExemptItem);
-    const scoreable = items.filter((item) => !isExemptItem(item));
+// Phase D's entry point: prune a slot's item candidates (already filtered by
+// the caller's level/category/exclusion rules - see optimizer.js's
+// selectCandidates, which deliberately runs this *after* those filters so an
+// item the player excluded, e.g. a "best in slot" that's unreachable or too
+// hard to obtain, can never suppress a reachable, otherwise-dominated
+// alternative from surviving) down to each group's Pareto frontier, using
+// the same full context-adjusted vectors combinedScore ranks by so a
+// pruning decision is always consistent with the score. Offense and defense
+// are concatenated into one 14-dimension vector per item rather than
+// computing two separate frontiers and unioning them - a separate-frontier
+// union is broken for any item tied at zero on one axis (e.g. a pure-armor
+// piece has an all-zero offense vector): ties never dominate, so every such
+// item would trivially "survive" that axis's frontier no matter how
+// dominated it is on the other axis, defeating pruning for most non-hybrid
+// items. A single combined vector still correctly keeps genuine tradeoffs
+// (better offense, worse defense, or vice versa) since neither side
+// dominates the other once at least one dimension favors each.
+export function pruneCandidates(items, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
     const survivors = [];
-    for (const group of groupByProficiency(scoreable)) {
-        const offenseSurvivors = paretoFrontier(group, computeOffenseVector);
-        const defenseSurvivors = paretoFrontier(group, computeDefenseVector);
-        const survivorIds = new Set([...offenseSurvivors, ...defenseSurvivors].map((item) => item.id));
-        survivors.push(...group.filter((item) => survivorIds.has(item.id)));
+    for (const group of groupForPruning(items)) {
+        if (group.length <= 1) {
+            survivors.push(...group);
+            continue;
+        }
+        const vectorFn = (item) => {
+            const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
+            return [...offense, ...defense];
+        };
+        survivors.push(...paretoFrontier(group, vectorFn));
     }
-    return [...exempt, ...survivors];
+    return survivors;
 }

@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition, getOffHandEfficiencyPercent, scaleOffHandStats, computeProficiencyVectors } from './valueScoring';
+import { computeScoringVectors, isNetNegativeCondition, pruneCandidates } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
@@ -8,43 +8,16 @@ function sum(vector) {
     return vector.reduce((a, b) => a + b, 0);
 }
 
-// Vector dims scaled by off-hand dual-wield efficiency (see valueScoring.js's
-// scaleOffHandStats): offense keeps dmg.min/dmg.max/attackChance/
-// criticalSkill/criticalMultiplier discounted but leaves -attackCost and the
-// reflect dim alone; defense keeps blockChance/resistance/maxHP/maxAP
-// discounted but leaves the proc-HP dims alone.
-const OFFENSE_SCALED_DIM_COUNT = 5;
-const DEFENSE_SCALED_DIM_COUNT = 4;
-
-// Direct hitEffect/killEffect/hitReceivedEffect HP recovery and reflect
-// damage are already folded into computeOffenseVector/computeDefenseVector.
-// conditionsById (optional - omitted call sites just skip these terms) adds
-// the chance-based condition procs via valueScoring's proxy-occupancy
-// estimate, consistent with Phase C's stance of not running real combat
-// formulas at scoring time (see valueScoring.js's header comment), plus the
-// permanent equip-granted condition (equipEffect.addedConditions, e.g. Feline
-// Gloves' self-inflicted Clumsiness). sharedConditionSlotCounts (optional)
-// amortizes a net-negative condition's penalty across however many distinct
-// slots could bring the same non-stacking debuff - see valueScoring.js's
-// computeEquipConditionVectors for why. slot/skillLevels (optional) discount
-// a weapon's own stats when it's being scored as an off-hand dual-wield
-// candidate (the shield slot) and the build's Dual Wield skill is below
-// level 2 - see valueScoring.js's getOffHandEfficiencyPercent for why a
-// main-hand candidate is never discounted this way - and separately add
-// weapon/shield/armor proficiency plus the two-handed fighting style bonus
-// (valueScoring.js's computeProficiencyVectors already bakes the same
-// off-hand discount into an off-hand weapon's own proficiency bonus, so no
-// further scaling is applied here).
+// Scalar ranking signal for a slot's pool: sums valueScoring.js's
+// computeScoringVectors (base equip stats with off-hand-efficiency scaling,
+// chance-based condition procs, permanent equip-granted conditions, and
+// weapon/shield/armor proficiency + two-handed fighting style - see that
+// function's own header comment for what each term covers) into the same
+// 0.6 offense / 0.4 defense weighted score pruneCandidates' Pareto dominance
+// checks are built from, so ranking and pruning are always consistent.
 export function combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
-    const procVectors = computeProcConditionVectors(item, conditionsById);
-    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
-    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels);
-    const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
-    const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
-    const defenseVec = scaleOffHandStats(computeDefenseVector(item), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
-    const offense = sum(offenseVec) + sum(procVectors.offense) + sum(equipConditionVectors.offense) + sum(proficiencyVectors.offense);
-    const defense = sum(defenseVec) + sum(procVectors.defense) + sum(equipConditionVectors.defense) + sum(proficiencyVectors.defense);
-    return 0.6 * offense + 0.4 * defense;
+    const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
+    return 0.6 * sum(offense) + 0.4 * sum(defense);
 }
 
 // Counts, per conditionId, how many distinct equip slots (categoryLink.
@@ -100,6 +73,13 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
+    // Pareto-pruning runs after the filters above on purpose: an item the
+    // player excluded (locked out, unreachable, too hard to obtain) is
+    // already gone from `pool` by this point, so it can never dominate - and
+    // thereby suppress - an otherwise-inferior alternative that's actually
+    // available. Pruning before these filters would risk losing that
+    // alternative to a "best in slot" the player can't even use.
+    pool = pruneCandidates(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
     const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels));
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
