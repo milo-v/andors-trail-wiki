@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors } from './valueScoring';
+import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon } from './statEngine';
@@ -10,14 +10,17 @@ function sum(vector) {
 
 // Direct hitEffect/killEffect/hitReceivedEffect HP recovery and reflect
 // damage are already folded into computeOffenseVector/computeDefenseVector.
-// conditionsById (optional - omitted call sites just skip this term) adds
-// the chance-based condition procs on top via valueScoring's proxy-occupancy
+// conditionsById (optional - omitted call sites just skip these terms) adds
+// the chance-based condition procs via valueScoring's proxy-occupancy
 // estimate, consistent with Phase C's stance of not running real combat
-// formulas at scoring time (see valueScoring.js's header comment).
+// formulas at scoring time (see valueScoring.js's header comment), plus the
+// permanent equip-granted condition (equipEffect.addedConditions, e.g. Feline
+// Gloves' self-inflicted Clumsiness) at full weight since it's always active.
 export function combinedScore(item, conditionsById) {
     const procVectors = computeProcConditionVectors(item, conditionsById);
-    const offense = sum(computeOffenseVector(item)) + sum(procVectors.offense);
-    const defense = sum(computeDefenseVector(item)) + sum(procVectors.defense);
+    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById);
+    const offense = sum(computeOffenseVector(item)) + sum(procVectors.offense) + sum(equipConditionVectors.offense);
+    const defense = sum(computeDefenseVector(item)) + sum(procVectors.defense) + sum(equipConditionVectors.defense);
     return 0.6 * offense + 0.4 * defense;
 }
 

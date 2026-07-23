@@ -110,6 +110,27 @@ function scoreProcConditions(entries, conditionsById, isEnemyEffect) {
 // abilityEffect; omit it (e.g. call sites that don't have it handy) and
 // these contributions are simply skipped, matching the pre-existing
 // direct-stat-only scoring.
+// Permanent, always-on conditions an item inflicts on its own wearer while
+// equipped (equipEffect.addedConditions - ActorStatsController.java's
+// addConditionsFromEquippedItem, e.g. Feline Gloves' self-inflicted
+// Clumsiness). Unlike the chance-based procs above, these are active 100% of
+// the time the item is worn, so no occupancy/proxy math applies - the
+// magnitude itself is the full weight, mirroring statEngine.js's
+// applyActiveConditions (magnitude <= 0 means "grants immunity", not an
+// inverted effect).
+export function computeEquipConditionVectors(item, conditionsById) {
+    let offense = [0, 0, 0, 0, 0, 0, 0];
+    let defense = [0, 0, 0, 0, 0, 0, 0];
+    if (!conditionsById) return { offense, defense };
+    for (const entry of item?.equipEffect?.addedConditions || []) {
+        const condition = conditionsById[entry.condition];
+        if (!condition?.abilityEffect || !entry.magnitude || entry.magnitude <= 0) continue;
+        offense = addVectors(offense, scaleVector(abilityEffectAsOffenseVector(condition.abilityEffect), entry.magnitude));
+        defense = addVectors(defense, scaleVector(abilityEffectAsDefenseVector(condition.abilityEffect), entry.magnitude));
+    }
+    return { offense, defense };
+}
+
 export function computeProcConditionVectors(item, conditionsById) {
     if (!conditionsById) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
     const parts = [
