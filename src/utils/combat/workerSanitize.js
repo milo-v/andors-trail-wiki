@@ -31,6 +31,34 @@ function sanitizeAbilityEffect(effect) {
     };
 }
 
+function sanitizeProcConditionList(entries) {
+    return (entries || []).map(({ condition, magnitude, duration, chance }) => ({ condition, magnitude, duration, chance }));
+}
+
+// hitEffect/killEffect/hitReceivedEffect shape (procEffects.js/combatMath.js
+// read all of these): conditionsSource/conditionsTarget proc lists, direct
+// increaseCurrentHP/AP boosts, and hitReceivedEffect's increaseAttacker*
+// reflect fields (harmless no-ops on hitEffect/killEffect, which never set them).
+function sanitizeProcEffect(effect) {
+    if (!effect) return effect;
+    return {
+        conditionsSource: sanitizeProcConditionList(effect.conditionsSource),
+        conditionsTarget: sanitizeProcConditionList(effect.conditionsTarget),
+        increaseCurrentHP: effect.increaseCurrentHP
+            ? { min: effect.increaseCurrentHP.min, max: effect.increaseCurrentHP.max }
+            : undefined,
+        increaseCurrentAP: effect.increaseCurrentAP
+            ? { min: effect.increaseCurrentAP.min, max: effect.increaseCurrentAP.max }
+            : undefined,
+        increaseAttackerCurrentHP: effect.increaseAttackerCurrentHP
+            ? { min: effect.increaseAttackerCurrentHP.min, max: effect.increaseAttackerCurrentHP.max }
+            : undefined,
+        increaseAttackerCurrentAP: effect.increaseAttackerCurrentAP
+            ? { min: effect.increaseAttackerCurrentAP.min, max: effect.increaseAttackerCurrentAP.max }
+            : undefined,
+    };
+}
+
 export function sanitizeItemForWorker(item) {
     return {
         id: item.id,
@@ -39,6 +67,9 @@ export function sanitizeItemForWorker(item) {
             ? { id: item.categoryLink.id, inventorySlot: item.categoryLink.inventorySlot, size: item.categoryLink.size }
             : null,
         equipEffect: sanitizeAbilityEffect(item.equipEffect),
+        hitEffect: sanitizeProcEffect(item.hitEffect),
+        killEffect: sanitizeProcEffect(item.killEffect),
+        hitReceivedEffect: sanitizeProcEffect(item.hitReceivedEffect),
     };
 }
 
@@ -58,6 +89,8 @@ export function sanitizeMonsterForWorker(monster) {
         maxAP: monster.maxAP,
         isImmuneToCriticalHits: monster.isImmuneToCriticalHits,
         activeConditions: (monster.activeConditions || []).map(({ conditionId, magnitude }) => ({ conditionId, magnitude })),
+        hitEffect: sanitizeProcEffect(monster.hitEffect),
+        hitReceivedEffect: sanitizeProcEffect(monster.hitReceivedEffect),
     };
 }
 

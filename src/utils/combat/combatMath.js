@@ -3,8 +3,9 @@
 // No RNG: every value here is a closed-form expected value, matching the game's
 // own implementation.
 
-import { resolvePlayerStats, resolveMonsterStats } from './statEngine';
+import { resolvePlayerStats, resolveMonsterStats, resolveEquipped, EQUIP_SLOTS } from './statEngine';
 import { SKILL_IDS, SKILL_CONSTANTS } from './skillData';
+import { averageRange, getExpectedBoostPerTurn, applyExpectedProcConditions } from './procEffects';
 
 export function getAttacksPerTurn(stats) {
     return Math.floor(stats.maxAP / stats.attackCost);
@@ -77,8 +78,16 @@ export function getAverageDamagePerTurn(attacker, target) {
     return getAverageDamagePerHit(attacker, target) * getAttacksPerTurn(attacker);
 }
 
-// CombatController.java:550-560.
+// CombatController.java:550-560. attacksPerTurn <= 0 (attackCost exceeds
+// maxAP - the game resets AP to max every turn with no carryover, so this
+// weapon can *never* be swung, not just "swung rarely") is a structurally
+// different kind of impossible than "attacks land but deal ≤0 net damage" -
+// the latter still uses the game's own 100-turn fallback, but the former
+// needs the same 999 sentinel as the other impossible cases below it, or a
+// build that can't attack at all reports a finite, plausible-looking
+// hpLossPerKill instead of correctly sorting to the bottom as unusable.
 export function getTurnsToKillTarget(attacker, target) {
+    if (getAttacksPerTurn(attacker) <= 0) return 999;
     if (hasCriticalAttack(attacker, target)) {
         if (attacker.damagePotential.max * attacker.criticalMultiplier <= target.damageResistance) return 999;
     } else {
@@ -128,27 +137,151 @@ function getExpectedConditionHPPerRound(activeConditions, conditionsById) {
     return total;
 }
 
+// Expected HP restored per kill from equipped items' killEffect -
+// ActorStatsController.applyKillEffectsToPlayer fires once per kill,
+// independent of the Eater skill's own flat per-kill restore. killEffect's
+// other fields (increaseCurrentAP, conditionsSource) aren't modeled: they'd
+// only affect a *subsequent* encounter, which this calculator (one build vs
+// one monster) never simulates.
+function getExpectedKillEffectHP(playerItems) {
+    let total = 0;
+    for (const item of playerItems) {
+        total += averageRange(item.killEffect?.increaseCurrentHP);
+    }
+    return total;
+}
+
+// Skill-based procs that fire off attack outcomes rather than a flat stat
+// (SkillController.applySkillEffectsFromPlayerAttack/
+// applySkillEffectsFromMonsterAttack): Concussion/Crit1/Crit2 apply a fixed
+// condition to the monster on the player's hit/critical hit; Taunt drains
+// the monster's AP on the monster's miss. Unlike item procs, chance/
+// magnitude/duration are fixed game constants, not read from JSON.
+function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById) {
+    const lvl = (id) => build.skillLevels[id] || 0;
+
+    const concussionLevel = lvl(SKILL_IDS.CONCUSSION);
+    if (concussionLevel > 0 && adjustedPlayer.attackChance - adjustedMonster.blockChance > SKILL_CONSTANTS.CONCUSSION_THRESHOLD) {
+        applyExpectedProcConditions(adjustedMonster, [{
+            condition: 'concussion',
+            magnitude: SKILL_CONSTANTS.CONCUSSION_CONDITION_MAGNITUDE,
+            duration: SKILL_CONSTANTS.CONCUSSION_CONDITION_DURATION,
+            chance: SKILL_CONSTANTS.CONCUSSION_CHANCE_PERCENT * concussionLevel,
+        }], baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+    }
+
+    const crit1Level = lvl(SKILL_IDS.CRIT1);
+    const crit2Level = lvl(SKILL_IDS.CRIT2);
+    if ((crit1Level > 0 || crit2Level > 0) && hasCriticalAttack(adjustedPlayer, adjustedMonster)) {
+        // Chance out of 100 that a given attack both lands *and* crits.
+        const critHitChancePercent = baseHitChancePlayer * (getEffectiveCriticalChance(adjustedPlayer.criticalSkill) / 100);
+        if (crit1Level > 0) {
+            applyExpectedProcConditions(adjustedMonster, [{
+                condition: 'crit1', magnitude: SKILL_CONSTANTS.CRIT_CONDITION_MAGNITUDE,
+                duration: SKILL_CONSTANTS.CRIT_CONDITION_DURATION, chance: SKILL_CONSTANTS.CRIT1_CHANCE_PERCENT * crit1Level,
+            }], critHitChancePercent, baseAttacksPlayer, conditionsById);
+        }
+        if (crit2Level > 0) {
+            applyExpectedProcConditions(adjustedMonster, [{
+                condition: 'crit2', magnitude: SKILL_CONSTANTS.CRIT_CONDITION_MAGNITUDE,
+                duration: SKILL_CONSTANTS.CRIT_CONDITION_DURATION, chance: SKILL_CONSTANTS.CRIT2_CHANCE_PERCENT * crit2Level,
+            }], critHitChancePercent, baseAttacksPlayer, conditionsById);
+        }
+    }
+}
+
 // Builds the full set of calculator outputs for one player build vs one monster.
 export function computeCombatSummary(build, monster, { itemsById, conditionsById }) {
     const player = resolvePlayerStats(build, { itemsById, conditionsById });
     const target = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+    const equipped = resolveEquipped(build.equipment, itemsById);
+    const playerItems = EQUIP_SLOTS.map(slot => equipped[slot]).filter(Boolean);
 
-    const difficulty = getMonsterDifficulty(player, target);
+    // Base (pre-proc-adjustment) rates - the single-pass inputs every proc
+    // formula below uses. Intentionally not recomputed after applying procs:
+    // e.g. AP a proc grants could itself buy another attack that could
+    // itself proc more AP, but chasing that fixed point would be more
+    // precision than a single min-max roll estimate can really support.
+    const baseHitChancePlayer = getAttackHitChance(player, target);
+    const baseHitChanceMonster = getAttackHitChance(target, player);
+    const baseAttacksPlayer = getAttacksPerTurn(player);
+    const baseAttacksMonster = getAttacksPerTurn(target);
+
+    // --- AP deltas (re-floor once - the game has no fractional attacks) ---
+    let playerBonusAP = 0;
+    let monsterBonusAP = 0; // negative = drained
+
+    for (const item of playerItems) {
+        // Player's own gear firing on the player's hits against the monster.
+        playerBonusAP += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentAP, baseHitChancePlayer, baseAttacksPlayer);
+        // Player's gear reacting when the *player* is hit by the monster.
+        playerBonusAP += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentAP, baseHitChanceMonster, baseAttacksMonster);
+        monsterBonusAP += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseAttackerCurrentAP, baseHitChanceMonster, baseAttacksMonster);
+    }
+    // Monster's own effects (rare in practice, but the data shape allows it),
+    // symmetric to the player's gear above.
+    monsterBonusAP += getExpectedBoostPerTurn(monster.hitEffect?.increaseCurrentAP, baseHitChanceMonster, baseAttacksMonster);
+    monsterBonusAP += getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseCurrentAP, baseHitChancePlayer, baseAttacksPlayer);
+    playerBonusAP += getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseAttackerCurrentAP, baseHitChancePlayer, baseAttacksPlayer);
+
+    // Taunt: fires on the monster's *miss* against the player.
+    const tauntLevel = build.skillLevels[SKILL_IDS.TAUNT] || 0;
+    if (tauntLevel > 0) {
+        const tauntChance = (SKILL_CONSTANTS.TAUNT_CHANCE_PERCENT * tauntLevel) / 100;
+        monsterBonusAP -= (1 - baseHitChanceMonster / 100) * tauntChance * SKILL_CONSTANTS.TAUNT_AP_LOSS * baseAttacksMonster;
+    }
+
+    const adjustedPlayer = { ...player, damagePotential: { ...player.damagePotential }, maxAP: Math.max(0, player.maxAP + playerBonusAP) };
+    const adjustedMonster = { ...target, damagePotential: { ...target.damagePotential }, maxAP: Math.max(0, target.maxAP + monsterBonusAP) };
+
+    // --- Condition procs (occupancy/stacking math lives in procEffects.js) ---
+    for (const item of playerItems) {
+        applyExpectedProcConditions(adjustedPlayer, item.hitEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+        applyExpectedProcConditions(adjustedMonster, item.hitEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+        applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+        applyExpectedProcConditions(adjustedMonster, item.hitReceivedEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+    }
+    applyExpectedProcConditions(adjustedMonster, monster.hitEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+    applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+    applyExpectedProcConditions(adjustedMonster, monster.hitReceivedEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+    applyExpectedProcConditions(adjustedPlayer, monster.hitReceivedEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+
+    applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById);
+
+    const difficulty = getMonsterDifficulty(adjustedPlayer, adjustedMonster);
     const difficultyLabel = getDifficultyLabel(difficulty);
 
-    const damagePerTurn = getAverageDamagePerTurn(player, target);
-    const hpLossPerTurn = getAverageDamagePerTurn(target, player);
-    const turnsToKillMonster = getTurnsToKillTarget(player, target);
+    // Reflect/thorns-style direct damage (hitReceivedEffect's
+    // increaseAttackerCurrentHP - negative values are damage to the
+    // attacker) is folded straight into damage/turn and hp-loss/turn: it's
+    // extra damage dealt at the rate of the *other* side's attacks, exactly
+    // like the weapon damage it's added alongside.
+    let bonusDamageToMonsterPerTurn = 0;
+    for (const item of playerItems) {
+        bonusDamageToMonsterPerTurn -= getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseAttackerCurrentHP, baseHitChanceMonster, baseAttacksMonster);
+    }
+    const bonusDamageToPlayerPerTurn = -getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseAttackerCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
+
+    const damagePerTurn = getAverageDamagePerTurn(adjustedPlayer, adjustedMonster) + bonusDamageToMonsterPerTurn;
+    const hpLossPerTurn = getAverageDamagePerTurn(adjustedMonster, adjustedPlayer) + bonusDamageToPlayerPerTurn;
+    const turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
 
     const regenPerTurn = getExpectedConditionHPPerRound(build.activeConditions, conditionsById);
-    const hpGainPerTurn = regenPerTurn;
+    let hitEffectHPPerTurn = 0;
+    for (const item of playerItems) {
+        hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
+        hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentHP, baseHitChanceMonster, baseAttacksMonster);
+    }
+    hitEffectHPPerTurn += getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
+    const hpGainPerTurn = regenPerTurn + hitEffectHPPerTurn;
 
     const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
 
-    // Eater skill + any item killEffect HP restores are flat, deterministic
-    // per-kill bonuses (not expected values), per CombatController.playerKilledMonster.
+    // Eater skill's per-kill restore is a flat, deterministic bonus; item
+    // killEffect HP restores are an expected value (min-max roll), per
+    // ActorStatsController.applyKillEffectsToPlayer/applyUseEffect.
     const eaterLevel = build.skillLevels[SKILL_IDS.EATER] || 0;
-    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH;
+    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH + getExpectedKillEffectHP(playerItems);
 
     return {
         difficulty,

@@ -35,6 +35,21 @@ export const SKILL_IDS = {
     SPECIALIZATION_2HAND: 'specialization2hand',
     SPECIALIZATION_WEAPON_SHIELD: 'specializationWeaponShield',
     SPECIALIZATION_DUAL_WIELD: 'specializationDualWield',
+
+    // General combat skills that act as chance-based procs on a hit/miss/crit
+    // outcome (SkillController.applySkillEffectsFromPlayerAttack/
+    // applySkillEffectsFromMonsterAttack) rather than a flat stat modifier -
+    // see procEffects.js for how these get folded into combat math.
+    CRIT1: 'crit1',
+    CRIT2: 'crit2',
+    TAUNT: 'taunt',
+    CONCUSSION: 'concussion',
+    // Evasion has no combat-turn effect at all (SkillCollection.java: it only
+    // scales flee chance and out-of-combat monster-aggression chance) - it
+    // exists here purely because Taunt's real level-up requirement gates on
+    // it, so leaving it out would let the calculator allow allocating Taunt
+    // when the real game wouldn't.
+    EVASION: 'evasion',
 };
 
 // Per-skillpoint constants, from SkillCollection.java.
@@ -86,6 +101,21 @@ export const SKILL_CONSTANTS = {
     DUALWIELD_LEVEL1_OFFHAND_AP_COST_PERCENT: 50,
     SPECIALIZATION_DUALWIELD_AC_PERCENT: 50,
     SPECIALIZATION_DUALWIELD_BC_PERCENT: 50,
+
+    // Chance-based general combat skills (SkillController.java:173-202). Each
+    // fires on a specific attack outcome; magnitude/duration for the
+    // conditions they grant are fixed constants in the game source (not read
+    // from item/condition JSON like equipment procs are).
+    CRIT1_CHANCE_PERCENT: 50,
+    CRIT2_CHANCE_PERCENT: 50,
+    CRIT_CONDITION_MAGNITUDE: 1,
+    CRIT_CONDITION_DURATION: 5,
+    TAUNT_CHANCE_PERCENT: 75,
+    TAUNT_AP_LOSS: 2,
+    CONCUSSION_CHANCE_PERCENT: 15,
+    CONCUSSION_THRESHOLD: 50,
+    CONCUSSION_CONDITION_MAGNITUDE: 1,
+    CONCUSSION_CONDITION_DURATION: 5,
 };
 
 // Weapon item-category id -> weapon proficiency skill, from
@@ -173,6 +203,12 @@ export const SKILL_META = {
     [SKILL_IDS.SPECIALIZATION_2HAND]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Two-handed weapon' },
     [SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Weapon and shield' },
     [SKILL_IDS.SPECIALIZATION_DUAL_WIELD]: { category: SKILL_CATEGORY.FIGHTSTYLE, maxLevel: 1, name: 'Specialization: Dual wield' },
+
+    [SKILL_IDS.CRIT1]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 1, name: 'Critical hit I' },
+    [SKILL_IDS.CRIT2]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 1, name: 'Critical hit II' },
+    [SKILL_IDS.TAUNT]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 1, name: 'Taunt' },
+    [SKILL_IDS.CONCUSSION]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 1, name: 'Concussion' },
+    [SKILL_IDS.EVASION]: { category: SKILL_CATEGORY.GENERAL, maxLevel: 4, name: 'Evasion' },
 };
 
 // Level-gating requirements, ported from SkillCollection.java:initialize()'s
@@ -215,6 +251,24 @@ export const LEVELUP_REQUIREMENTS = {
     [SKILL_IDS.SPECIALIZATION_WEAPON_SHIELD]: [
         { type: 'experienceLevel', every: 45, initial: 0 },
         { type: 'otherSkill', skillId: SKILL_IDS.FIGHTSTYLE_WEAPON_SHIELD, every: 2, initial: 0 },
+    ],
+    [SKILL_IDS.CRIT1]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.MORE_CRITICALS, every: 2, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.BETTER_CRITICALS, every: 2, initial: 0 },
+    ],
+    [SKILL_IDS.CRIT2]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.MORE_CRITICALS, every: 4, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.BETTER_CRITICALS, every: 4, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.CRIT1, every: 1, initial: 0 },
+    ],
+    [SKILL_IDS.TAUNT]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.EVASION, every: 2, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.DODGE, every: 4, initial: 0 },
+    ],
+    [SKILL_IDS.CONCUSSION]: [
+        { type: 'otherSkill', skillId: SKILL_IDS.SPEED, every: 2, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.WEAPON_CHANCE, every: 3, initial: 0 },
+        { type: 'otherSkill', skillId: SKILL_IDS.WEAPON_DMG, every: 5, initial: 0 },
     ],
 };
 
