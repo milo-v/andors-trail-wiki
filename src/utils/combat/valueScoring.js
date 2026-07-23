@@ -7,8 +7,9 @@
 // marginal-delta-at-one-baseline score unreliable near the curve's edges.
 // See docs/superpowers/specs/2026-07-21-damage-calculator-phase-c-design.md.
 
-import { getProficiencySkillForCategory } from './skillData';
+import { getProficiencySkillForCategory, SKILL_IDS, SKILL_CONSTANTS } from './skillData';
 import { averageRange } from './procEffects';
+import { isWeapon } from './statEngine';
 
 // Vector dimension order: [attackDamageMin, attackDamageMax, attackChance,
 // criticalSkill, criticalMultiplier, -attackCost, reflectDamageToAttacker].
@@ -50,6 +51,42 @@ export function computeDefenseVector(item) {
         averageRange(item?.killEffect?.increaseCurrentHP),
         averageRange(item?.hitReceivedEffect?.increaseCurrentHP),
     ];
+}
+
+// ActorStatsController.applyDualWield: an off-hand weapon's own equip stats
+// only land at this percent (level 0/1/2 -> 25/50/100%) when both hands hold
+// a weapon - full value only at level 2. Attack cost is excluded on purpose:
+// it follows its own separate max/sum formula (optimizer.js's AP-feasibility
+// filter handles that directly), not this generic percent scaling.
+export function getDualWieldEfficiencyPercent(skillLevels) {
+    const fsLevel = skillLevels?.[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+    if (fsLevel >= 2) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL2;
+    if (fsLevel === 1) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL1;
+    return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL0;
+}
+
+// Only relevant when scoring a weapon as a candidate for the *shield* slot
+// (a light/std weapon considered for off-hand dual-wielding) - a weapon
+// scored for the main weapon slot is never discounted, matching
+// applyEquipment's mainHand handling. Returns null (no discount) otherwise,
+// including the case where the same weapon ends up wielded alone (main hand
+// empty) rather than genuinely dual-wielded - Phase C scores items in
+// isolation and can't know which of those two outcomes a given candidate
+// will land in, so this assumes the common case (paired with an actual main
+// hand) rather than the edge case of an off-hand-only build.
+export function getOffHandEfficiencyPercent(item, slot, skillLevels) {
+    if (slot !== 'shield' || !isWeapon(item)) return null;
+    return getDualWieldEfficiencyPercent(skillLevels);
+}
+
+// Discounts only the leading "flat equip stat" dimensions of a vector by an
+// off-hand efficiency percent - attack cost (offense vector index 5) and any
+// proc-based dimensions (hitReceivedEffect reflect/HP, hitEffect/killEffect
+// HP) are never part of applyDualWield's generic percent scaling, so
+// scaledDimCount stops short of them (5 for offense, 4 for defense).
+export function scaleOffHandStats(vector, percent, scaledDimCount) {
+    if (percent == null || percent === 100) return vector;
+    return vector.map((v, i) => (i < scaledDimCount ? (v * percent) / 100 : v));
 }
 
 function abilityEffectAsOffenseVector(effect) {
