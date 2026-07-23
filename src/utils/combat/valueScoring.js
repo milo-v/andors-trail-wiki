@@ -9,6 +9,7 @@
 
 import { getProficiencySkillForCategory } from './skillData';
 import { averageRange } from './procEffects';
+import { isWeapon, getDualWieldEfficiencyPercent, computeProficiencyBonus } from './statEngine';
 
 // Vector dimension order: [attackDamageMin, attackDamageMax, attackChance,
 // criticalSkill, criticalMultiplier, -attackCost, reflectDamageToAttacker].
@@ -52,6 +53,30 @@ export function computeDefenseVector(item) {
     ];
 }
 
+// Only relevant when scoring a weapon as a candidate for the *shield* slot
+// (a light/std weapon considered for off-hand dual-wielding) - a weapon
+// scored for the main weapon slot is never discounted, matching
+// applyEquipment's mainHand handling. Returns null (no discount) otherwise,
+// including the case where the same weapon ends up wielded alone (main hand
+// empty) rather than genuinely dual-wielded - Phase C scores items in
+// isolation and can't know which of those two outcomes a given candidate
+// will land in, so this assumes the common case (paired with an actual main
+// hand) rather than the edge case of an off-hand-only build.
+export function getOffHandEfficiencyPercent(item, slot, skillLevels) {
+    if (slot !== 'shield' || !isWeapon(item)) return null;
+    return getDualWieldEfficiencyPercent(skillLevels);
+}
+
+// Discounts only the leading "flat equip stat" dimensions of a vector by an
+// off-hand efficiency percent - attack cost (offense vector index 5) and any
+// proc-based dimensions (hitReceivedEffect reflect/HP, hitEffect/killEffect
+// HP) are never part of applyDualWield's generic percent scaling, so
+// scaledDimCount stops short of them (5 for offense, 4 for defense).
+export function scaleOffHandStats(vector, percent, scaledDimCount) {
+    if (percent == null || percent === 100) return vector;
+    return vector.map((v, i) => (i < scaledDimCount ? (v * percent) / 100 : v));
+}
+
 function abilityEffectAsOffenseVector(effect) {
     const dmg = effect?.increaseAttackDamage || { min: 0, max: 0 };
     return [dmg.min || 0, dmg.max || 0, effect?.increaseAttackChance || 0, effect?.increaseCriticalSkill || 0, effect?.setCriticalMultiplier || 0, -(effect?.increaseAttackCost || 0), 0];
@@ -59,6 +84,19 @@ function abilityEffectAsOffenseVector(effect) {
 function abilityEffectAsDefenseVector(effect) {
     return [effect?.increaseBlockChance || 0, effect?.increaseDamageResistance || 0, effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
 }
+
+// Weapon/shield/armor proficiency and the two-handed fighting style, folded
+// into offense/defense vector deltas via statEngine.js's
+// computeProficiencyBonus - see that function's header comment for exactly
+// which fighting styles are (and aren't) modeled here and why. skillLevels
+// omitted (e.g. call sites that don't have it handy) simply skips this term,
+// matching the pre-existing no-proficiency-bonus scoring.
+export function computeProficiencyVectors(item, slot, skillLevels) {
+    if (!skillLevels) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
+    const bonus = computeProficiencyBonus(item, slot, skillLevels);
+    return { offense: abilityEffectAsOffenseVector(bonus), defense: abilityEffectAsDefenseVector(bonus) };
+}
+
 function addVectors(a, b) {
     return a.map((v, i) => v + b[i]);
 }

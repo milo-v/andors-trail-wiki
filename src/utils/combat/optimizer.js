@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition } from './valueScoring';
+import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition, getOffHandEfficiencyPercent, scaleOffHandStats, computeProficiencyVectors } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
@@ -7,6 +7,14 @@ import { computeCombatSummary } from './combatMath';
 function sum(vector) {
     return vector.reduce((a, b) => a + b, 0);
 }
+
+// Vector dims scaled by off-hand dual-wield efficiency (see valueScoring.js's
+// scaleOffHandStats): offense keeps dmg.min/dmg.max/attackChance/
+// criticalSkill/criticalMultiplier discounted but leaves -attackCost and the
+// reflect dim alone; defense keeps blockChance/resistance/maxHP/maxAP
+// discounted but leaves the proc-HP dims alone.
+const OFFENSE_SCALED_DIM_COUNT = 5;
+const DEFENSE_SCALED_DIM_COUNT = 4;
 
 // Direct hitEffect/killEffect/hitReceivedEffect HP recovery and reflect
 // damage are already folded into computeOffenseVector/computeDefenseVector.
@@ -18,12 +26,24 @@ function sum(vector) {
 // Gloves' self-inflicted Clumsiness). sharedConditionSlotCounts (optional)
 // amortizes a net-negative condition's penalty across however many distinct
 // slots could bring the same non-stacking debuff - see valueScoring.js's
-// computeEquipConditionVectors for why.
-export function combinedScore(item, conditionsById, sharedConditionSlotCounts) {
+// computeEquipConditionVectors for why. slot/skillLevels (optional) discount
+// a weapon's own stats when it's being scored as an off-hand dual-wield
+// candidate (the shield slot) and the build's Dual Wield skill is below
+// level 2 - see valueScoring.js's getOffHandEfficiencyPercent for why a
+// main-hand candidate is never discounted this way - and separately add
+// weapon/shield/armor proficiency plus the two-handed fighting style bonus
+// (valueScoring.js's computeProficiencyVectors already bakes the same
+// off-hand discount into an off-hand weapon's own proficiency bonus, so no
+// further scaling is applied here).
+export function combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
     const procVectors = computeProcConditionVectors(item, conditionsById);
     const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
-    const offense = sum(computeOffenseVector(item)) + sum(procVectors.offense) + sum(equipConditionVectors.offense);
-    const defense = sum(computeDefenseVector(item)) + sum(procVectors.defense) + sum(equipConditionVectors.defense);
+    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels);
+    const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
+    const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
+    const defenseVec = scaleOffHandStats(computeDefenseVector(item), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
+    const offense = sum(offenseVec) + sum(procVectors.offense) + sum(equipConditionVectors.offense) + sum(proficiencyVectors.offense);
+    const defense = sum(defenseVec) + sum(procVectors.defense) + sum(equipConditionVectors.defense) + sum(proficiencyVectors.defense);
     return 0.6 * offense + 0.4 * defense;
 }
 
@@ -59,14 +79,14 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // so it doubles as "evaluate the most promising combos first" - useful when
 // candidatesPerSlot is unlimited and the search may be cancelled before it
 // finishes.
-function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts) {
-    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts) - combinedScore(a, conditionsById, sharedConditionSlotCounts);
+function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
+    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) - combinedScore(a, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
     if (scoreDiff !== 0) return scoreDiff;
     return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
 }
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById, sharedConditionSlotCounts } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById, sharedConditionSlotCounts, skillLevels } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -80,7 +100,7 @@ export function selectCandidates(slot, items, options = {}) {
     if (excludedItemIds && excludedItemIds.size > 0) {
         pool = pool.filter(item => !excludedItemIds.has(item.id));
     }
-    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts));
+    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels));
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
     return candidatesPerSlot == null || candidatesPerSlot === Infinity
@@ -88,7 +108,7 @@ export function selectCandidates(slot, items, options = {}) {
         : sorted.slice(0, candidatesPerSlot);
 }
 
-export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById) {
+export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById, skillLevels) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
     const sharedConditionSlotCounts = computeSharedNegativeConditionSlotCounts(items, conditionsById);
     const result = {};
@@ -98,7 +118,7 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
             const lockedItem = itemsById[lockedId];
             result[slot] = lockedItem ? [lockedItem] : [];
         } else {
-            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById, sharedConditionSlotCounts });
+            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById, sharedConditionSlotCounts, skillLevels });
         }
     }
     // A two-handed weapon forces the shield slot empty for stat purposes
