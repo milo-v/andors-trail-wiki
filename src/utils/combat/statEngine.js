@@ -164,6 +164,32 @@ function applyDualWield(stats, mainHand, offHand, skillLevels, weaponDamage) {
     stats.useItemCost += getPercentage(e.increaseUseItemCost || 0, 100, percent);
 }
 
+// Attack-cost-only mirror of applyEquipment/applyDualWield's cost logic, for
+// callers (optimizer.js's weapon/shield pairing prune) that need just the
+// resulting attackCost from a candidate (weapon, offHand) pair without
+// resolving full stats. Single weapon in either hand: its own cost. Both
+// hands weapons: the same dual-wield formula (DUALWIELD_EFFICIENCY level 0-2)
+// applyDualWield uses. Neither hand a weapon: 0 (unarmed keeps the small
+// fixed fist cost from base traits, never a search-relevant bottleneck).
+export function computeWeaponPairAttackCost(mainHand, offHand, skillLevels) {
+    const mainIsWeapon = isWeapon(mainHand);
+    const offIsWeapon = isWeapon(offHand);
+    if (!mainIsWeapon && !offIsWeapon) return 0;
+    if (!(mainIsWeapon && offIsWeapon)) {
+        const weapon = mainIsWeapon ? mainHand : offHand;
+        return weapon.equipEffect?.increaseAttackCost || 0;
+    }
+    const attackCostMain = mainHand.equipEffect?.increaseAttackCost || 0;
+    const attackCostOff = offHand.equipEffect?.increaseAttackCost || 0;
+    const fsLevel = skillLevels[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+    if (fsLevel >= 2) return Math.max(attackCostMain, attackCostOff);
+    if (fsLevel === 1) {
+        return Math.max(attackCostMain, attackCostOff) +
+            getPercentage(Math.min(attackCostMain, attackCostOff), SKILL_CONSTANTS.DUALWIELD_LEVEL1_OFFHAND_AP_COST_PERCENT, 0);
+    }
+    return attackCostMain + attackCostOff;
+}
+
 function applyFightingStyles(stats, equipped, skillLevels, weaponDamage) {
     const lvl = (id) => skillLevels[id] || 0;
     const mainHand = equipped.weapon;

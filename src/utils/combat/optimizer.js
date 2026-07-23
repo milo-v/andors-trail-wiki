@@ -1,7 +1,7 @@
 import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
-import { EQUIP_SLOTS, isTwohandWeapon } from './statEngine';
+import { EQUIP_SLOTS, isTwohandWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
 import { computeCombatSummary } from './combatMath';
 
 function sum(vector) {
@@ -152,7 +152,29 @@ function isDisallowedPair(a, b, limitedItemIds) {
 // two-handed weapon always nulls the shield for stat purposes, per
 // statEngine.js's resolveEquipped - every shield candidate scores
 // identically, so only the first is worth keeping as a combo).
-function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemIds) {
+const ARMOR_LIKE_SLOTS = EQUIP_SLOTS.filter(slot => slot !== 'weapon' && slot !== 'shield');
+
+// Upper bound on maxAP this build could ever reach, using the actual
+// candidate pools already selected for the non-weapon slots (the single
+// best increaseMaxAP found in each slot, since only one item per slot can
+// be worn). Used below to prune weapon/shield pairings whose attack cost
+// can *never* leave a single attack per turn (e.g. dual-wielding two 7-cost
+// weapons with no Dual Wield skill) - those combos would just compute out
+// to the getTurnsToKillTarget Infinity sentinel anyway, so skipping them
+// here avoids evaluating every other slot's combinatorial product against
+// a foregone conclusion.
+function computeMaxAchievableAP(build, candidateLists) {
+    const stats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
+    applyGeneralCombatSkills(stats, build.skillLevels || {});
+    let maxAP = stats.maxAP;
+    for (const slot of ARMOR_LIKE_SLOTS) {
+        const items = candidateLists[slot] || [];
+        maxAP += items.reduce((best, item) => Math.max(best, item.equipEffect?.increaseMaxAP || 0), 0);
+    }
+    return maxAP;
+}
+
+function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemIds, skillLevels, maxAchievableAP) {
     const weapons = weaponCandidates.length > 0 ? weaponCandidates : [null];
     const shields = shieldCandidates.length > 0 ? shieldCandidates : [null];
     const pairs = [];
@@ -161,7 +183,13 @@ function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemI
         for (const shield of shields) {
             if (twoHanded && shield && shieldCandidates.length > 1 && shield !== shieldCandidates[0]) continue;
             if (isDisallowedPair(weapon, shield, limitedItemIds)) continue;
-            pairs.push({ weapon, shield: twoHanded ? null : shield });
+            const effectiveShield = twoHanded ? null : shield;
+            if (maxAchievableAP != null) {
+                const cost = computeWeaponPairAttackCost(weapon, effectiveShield, skillLevels || {});
+                const bonusAP = (weapon?.equipEffect?.increaseMaxAP || 0) + (effectiveShield?.equipEffect?.increaseMaxAP || 0);
+                if (cost > maxAchievableAP + bonusAP) continue;
+            }
+            pairs.push({ weapon, shield: effectiveShield });
         }
     }
     return pairs;
@@ -217,8 +245,9 @@ const SINGLE_SLOTS = ['head', 'body', 'hand', 'feet', 'neck'];
 // values are either a single-slot object ({ [slot]: item }) or a pre-merged
 // pair object ({ weapon, shield } / { leftring, rightring }) - cartesian()
 // doesn't need to know which.
-function buildDimensions(candidateLists, limitedItemIds) {
-    const dims = [{ values: buildWeaponShieldPairs(candidateLists.weapon || [], candidateLists.shield || [], limitedItemIds) }];
+function buildDimensions(candidateLists, limitedItemIds, build) {
+    const maxAchievableAP = build ? computeMaxAchievableAP(build, candidateLists) : null;
+    const dims = [{ values: buildWeaponShieldPairs(candidateLists.weapon || [], candidateLists.shield || [], limitedItemIds, build?.skillLevels, maxAchievableAP) }];
     for (const slot of SINGLE_SLOTS) {
         const list = candidateLists[slot] || [];
         if (list.length === 0) continue;
@@ -233,13 +262,15 @@ function buildDimensions(candidateLists, limitedItemIds) {
 // pair is disallowed - a genuinely impossible configuration, not "no item
 // equipped" (which is already represented as a { weapon: null, ... } entry
 // within a non-empty list) - so unlike single slots, an empty pair dimension
-// correctly makes the total (and the search) zero rather than one.
-export function countCombinations(candidateLists, limitedItemIds) {
-    return buildDimensions(candidateLists, limitedItemIds).reduce((product, d) => product * d.values.length, 1);
+// correctly makes the total (and the search) zero rather than one. `build`
+// is optional (omit it and the weapon/shield AP-feasibility prune above is
+// simply skipped, matching the pre-existing unfiltered behavior).
+export function countCombinations(candidateLists, limitedItemIds, build) {
+    return buildDimensions(candidateLists, limitedItemIds, build).reduce((product, d) => product * d.values.length, 1);
 }
 
-function* cartesian(candidateLists, limitedItemIds) {
-    const dims = buildDimensions(candidateLists, limitedItemIds);
+function* cartesian(candidateLists, limitedItemIds, build) {
+    const dims = buildDimensions(candidateLists, limitedItemIds, build);
     const indices = dims.map(() => 0);
     if (dims.some(d => d.values.length === 0)) return;
     while (true) {
@@ -260,7 +291,7 @@ function* cartesian(candidateLists, limitedItemIds) {
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
     const { maxHpLossPerKill, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000 } = options;
-    const total = countCombinations(candidateLists, limitedItemIds);
+    const total = countCombinations(candidateLists, limitedItemIds, build);
     let top10 = [];
     let evaluated = 0;
 
@@ -280,7 +311,7 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     // handed-weapon/shield dedup and the limit-1 constraint are both baked
     // into buildDimensions), so there's nothing left to reject - every
     // iteration goes straight to scoring.
-    for (const combo of cartesian(candidateLists, limitedItemIds)) {
+    for (const combo of cartesian(candidateLists, limitedItemIds, build)) {
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
         const candidateBuild = { ...build, equipment };
