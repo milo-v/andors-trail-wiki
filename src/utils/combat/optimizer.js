@@ -1,4 +1,4 @@
-import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition, getOffHandEfficiencyPercent, scaleOffHandStats } from './valueScoring';
+import { computeOffenseVector, computeDefenseVector, computeProcConditionVectors, computeEquipConditionVectors, isNetNegativeCondition, getOffHandEfficiencyPercent, scaleOffHandStats, computeProficiencyVectors } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
 import { EQUIP_SLOTS, isTwohandWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
@@ -30,15 +30,20 @@ const DEFENSE_SCALED_DIM_COUNT = 4;
 // a weapon's own stats when it's being scored as an off-hand dual-wield
 // candidate (the shield slot) and the build's Dual Wield skill is below
 // level 2 - see valueScoring.js's getOffHandEfficiencyPercent for why a
-// main-hand candidate is never discounted this way.
+// main-hand candidate is never discounted this way - and separately add
+// weapon/shield/armor proficiency plus the two-handed fighting style bonus
+// (valueScoring.js's computeProficiencyVectors already bakes the same
+// off-hand discount into an off-hand weapon's own proficiency bonus, so no
+// further scaling is applied here).
 export function combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
     const procVectors = computeProcConditionVectors(item, conditionsById);
     const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
+    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels);
     const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
     const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
     const defenseVec = scaleOffHandStats(computeDefenseVector(item), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
-    const offense = sum(offenseVec) + sum(procVectors.offense) + sum(equipConditionVectors.offense);
-    const defense = sum(defenseVec) + sum(procVectors.defense) + sum(equipConditionVectors.defense);
+    const offense = sum(offenseVec) + sum(procVectors.offense) + sum(equipConditionVectors.offense) + sum(proficiencyVectors.offense);
+    const defense = sum(defenseVec) + sum(procVectors.defense) + sum(equipConditionVectors.defense) + sum(proficiencyVectors.defense);
     return 0.6 * offense + 0.4 * defense;
 }
 

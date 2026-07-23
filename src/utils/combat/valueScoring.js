@@ -7,9 +7,9 @@
 // marginal-delta-at-one-baseline score unreliable near the curve's edges.
 // See docs/superpowers/specs/2026-07-21-damage-calculator-phase-c-design.md.
 
-import { getProficiencySkillForCategory, SKILL_IDS, SKILL_CONSTANTS } from './skillData';
+import { getProficiencySkillForCategory } from './skillData';
 import { averageRange } from './procEffects';
-import { isWeapon } from './statEngine';
+import { isWeapon, getDualWieldEfficiencyPercent, computeProficiencyBonus } from './statEngine';
 
 // Vector dimension order: [attackDamageMin, attackDamageMax, attackChance,
 // criticalSkill, criticalMultiplier, -attackCost, reflectDamageToAttacker].
@@ -53,18 +53,6 @@ export function computeDefenseVector(item) {
     ];
 }
 
-// ActorStatsController.applyDualWield: an off-hand weapon's own equip stats
-// only land at this percent (level 0/1/2 -> 25/50/100%) when both hands hold
-// a weapon - full value only at level 2. Attack cost is excluded on purpose:
-// it follows its own separate max/sum formula (optimizer.js's AP-feasibility
-// filter handles that directly), not this generic percent scaling.
-export function getDualWieldEfficiencyPercent(skillLevels) {
-    const fsLevel = skillLevels?.[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
-    if (fsLevel >= 2) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL2;
-    if (fsLevel === 1) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL1;
-    return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL0;
-}
-
 // Only relevant when scoring a weapon as a candidate for the *shield* slot
 // (a light/std weapon considered for off-hand dual-wielding) - a weapon
 // scored for the main weapon slot is never discounted, matching
@@ -96,6 +84,19 @@ function abilityEffectAsOffenseVector(effect) {
 function abilityEffectAsDefenseVector(effect) {
     return [effect?.increaseBlockChance || 0, effect?.increaseDamageResistance || 0, effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
 }
+
+// Weapon/shield/armor proficiency and the two-handed fighting style, folded
+// into offense/defense vector deltas via statEngine.js's
+// computeProficiencyBonus - see that function's header comment for exactly
+// which fighting styles are (and aren't) modeled here and why. skillLevels
+// omitted (e.g. call sites that don't have it handy) simply skips this term,
+// matching the pre-existing no-proficiency-bonus scoring.
+export function computeProficiencyVectors(item, slot, skillLevels) {
+    if (!skillLevels) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
+    const bonus = computeProficiencyBonus(item, slot, skillLevels);
+    return { offense: abilityEffectAsOffenseVector(bonus), defense: abilityEffectAsDefenseVector(bonus) };
+}
+
 function addVectors(a, b) {
     return a.map((v, i) => v + b[i]);
 }

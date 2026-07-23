@@ -190,6 +190,88 @@ export function computeWeaponPairAttackCost(mainHand, offHand, skillLevels) {
     return attackCostMain + attackCostOff;
 }
 
+// applyDualWield: an off-hand weapon's own equip stats (and its own
+// proficiency bonus, see computeProficiencyBonus below) only land at this
+// percent (level 0/1/2 -> 25/50/100%) when both hands hold a weapon - full
+// value only at level 2.
+export function getDualWieldEfficiencyPercent(skillLevels) {
+    const fsLevel = skillLevels?.[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+    if (fsLevel >= 2) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL2;
+    if (fsLevel === 1) return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL1;
+    return SKILL_CONSTANTS.DUALWIELD_EFFICIENCY_LEVEL0;
+}
+
+// Mirrors applyItemProficiencies's weapon/shield/armor proficiency scaling
+// and applyFightingStyles's two-handed weapon fighting-style bonus, as a
+// standalone per-item stat delta (same shape as equipEffect/abilityEffect)
+// for Phase C scoring (optimizer.js/valueScoring.js), which scores one
+// candidate at a time and can't resolve fighting styles that depend on what
+// ends up in the *other* hand - weapon+shield style, dual-wield
+// specialization, and unarmed fighting are deliberately NOT modeled here for
+// that reason. Safe to model unconditionally here because neither depends on
+// the other hand's contents: proficiency is purely per-item-category, and a
+// two-handed weapon always forces the shield slot empty (isTwohandWeapon).
+// slot: 'weapon' for a main-hand candidate; 'shield' for an off-hand
+// dual-wield weapon candidate (its own proficiency bonus is further scaled
+// by the same dual-wield efficiency percent applyDualWield's offhandProf*
+// handling uses) or a genuine shield (flat, item-independent
+// damageResistance bonus instead); an ARMOR_SLOTS name for armor.
+export function computeProficiencyBonus(item, slot, skillLevels) {
+    const bonus = { increaseAttackChance: 0, increaseBlockChance: 0, increaseCriticalSkill: 0, increaseDamageResistance: 0, increaseAttackCost: 0, increaseAttackDamage: { min: 0, max: 0 } };
+    if (!item || !skillLevels) return bonus;
+    const lvl = (id) => skillLevels[id] || 0;
+    const e = item.equipEffect;
+
+    if (slot === 'shield' && isShield(item)) {
+        const skill = getProficiencySkillForCategory(item.categoryLink);
+        bonus.increaseDamageResistance += (skill ? lvl(skill) : 0) * SKILL_CONSTANTS.SHIELD_PROF_DR;
+        return bonus;
+    }
+
+    if ((slot === 'weapon' || slot === 'shield') && isWeapon(item) && e) {
+        const skill = getProficiencySkillForCategory(item.categoryLink);
+        const level = skill ? lvl(skill) : 0;
+        if (level > 0) {
+            let ac = getPercentage(e.increaseAttackChance || 0, SKILL_CONSTANTS.WEAPON_PROF_AC_PERCENT * level, 0);
+            let bc = getPercentage(e.increaseBlockChance || 0, SKILL_CONSTANTS.WEAPON_PROF_BC_PERCENT * level, 0);
+            let cs = getPercentage(e.increaseCriticalSkill || 0, SKILL_CONSTANTS.WEAPON_PROF_CS_PERCENT * level, 0);
+            if (slot === 'shield') {
+                const dwPercent = getDualWieldEfficiencyPercent(skillLevels);
+                ac = getPercentage(ac, dwPercent, 0);
+                bc = getPercentage(bc, dwPercent, 0);
+                cs = getPercentage(cs, dwPercent, 0);
+            }
+            bonus.increaseAttackChance += ac;
+            bonus.increaseBlockChance += bc;
+            bonus.increaseCriticalSkill += cs;
+        }
+    }
+
+    if (ARMOR_SLOTS.includes(slot) && e) {
+        const skill = getProficiencySkillForCategory(item.categoryLink);
+        const level = skill ? lvl(skill) : 0;
+        if (skill === SKILL_IDS.ARMOR_PROF_LIGHT && level > 0) {
+            bonus.increaseBlockChance += getPercentage(e.increaseBlockChance || 0, SKILL_CONSTANTS.LIGHT_ARMOR_BC_PERCENT * level, 0);
+        } else if (skill === SKILL_IDS.ARMOR_PROF_HEAVY && level > 0) {
+            bonus.increaseBlockChance += getPercentage(e.increaseBlockChance || 0, SKILL_CONSTANTS.HEAVY_ARMOR_BC_PERCENT * level, 0);
+            bonus.increaseAttackCost -= getPercentage(e.increaseAttackCost || 0, SKILL_CONSTANTS.HEAVY_ARMOR_ATKCOST_PERCENT * level, 0);
+        }
+    }
+
+    if (slot === 'weapon' && isTwohandWeapon(item) && e) {
+        const fsLevel = lvl(SKILL_IDS.FIGHTSTYLE_2HAND);
+        const specLevel = lvl(SKILL_IDS.SPECIALIZATION_2HAND);
+        const dmg = e.increaseAttackDamage || { min: 0, max: 0 };
+        bonus.increaseAttackDamage.max += getPercentage(dmg.max || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.min += getPercentage(dmg.min || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.max += getPercentage(dmg.max || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.min += getPercentage(dmg.min || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackChance += getPercentage(e.increaseAttackChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_AC_PERCENT, 0);
+    }
+
+    return bonus;
+}
+
 function applyFightingStyles(stats, equipped, skillLevels, weaponDamage) {
     const lvl = (id) => skillLevels[id] || 0;
     const mainHand = equipped.weapon;
