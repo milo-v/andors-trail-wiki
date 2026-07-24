@@ -15,8 +15,11 @@ function sum(vector) {
 // function's own header comment for what each term covers) into the same
 // 0.6 offense / 0.4 defense weighted score pruneCandidates' Pareto dominance
 // checks are built from, so ranking and pruning are always consistent.
-export function combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
-    const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
+// monster (optional) scales damage resistance's weight against this
+// specific opponent's own average hit damage - see valueScoring.js's
+// getDamageResistanceWeight.
+export function combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
+    const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
     return 0.6 * sum(offense) + 0.4 * sum(defense);
 }
 
@@ -51,14 +54,14 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // ties. This is also the per-dimension order bestFirstCombos() ranks each
 // slot's index by (0 = best), so it doubles as "evaluate the most promising
 // combos first" across every dimension - not just this one slot in isolation.
-function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
-    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts, slot, skillLevels) - combinedScore(a, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
+function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
+    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) - combinedScore(a, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
     if (scoreDiff !== 0) return scoreDiff;
     return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
 }
 
 export function selectCandidates(slot, items, options = {}) {
-    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById, sharedConditionSlotCounts, skillLevels } = options;
+    const { maxItemLevel, categoryIds, excludedItemIds, candidatesPerSlot = DEFAULT_CANDIDATES_PER_SLOT, conditionsById, sharedConditionSlotCounts, skillLevels, monster } = options;
     let pool = getItemsForSlot(slot, items);
     if (maxItemLevel !== undefined && maxItemLevel !== null) {
         pool = pool.filter(item => {
@@ -78,8 +81,8 @@ export function selectCandidates(slot, items, options = {}) {
     // thereby suppress - an otherwise-inferior alternative that's actually
     // available. Pruning before these filters would risk losing that
     // alternative to a "best in slot" the player can't even use.
-    pool = pruneCandidates(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
-    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels));
+    pool = pruneCandidates(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
+    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster));
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
     return candidatesPerSlot == null || candidatesPerSlot === Infinity
@@ -87,7 +90,7 @@ export function selectCandidates(slot, items, options = {}) {
         : sorted.slice(0, candidatesPerSlot);
 }
 
-export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById, skillLevels) {
+export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById, skillLevels, monster) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
     const sharedConditionSlotCounts = computeSharedNegativeConditionSlotCounts(items, conditionsById);
     const result = {};
@@ -97,7 +100,7 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
             const lockedItem = itemsById[lockedId];
             result[slot] = lockedItem ? [lockedItem] : [];
         } else {
-            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById, sharedConditionSlotCounts, skillLevels });
+            result[slot] = selectCandidates(slot, items, { ...(filtersBySlot[slot] || {}), candidatesPerSlot, conditionsById, sharedConditionSlotCounts, skillLevels, monster });
         }
     }
     // A two-handed weapon forces the shield slot empty for stat purposes

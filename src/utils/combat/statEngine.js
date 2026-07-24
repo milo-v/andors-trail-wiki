@@ -262,10 +262,24 @@ export function computeProficiencyBonus(item, slot, skillLevels) {
         const fsLevel = lvl(SKILL_IDS.FIGHTSTYLE_2HAND);
         const specLevel = lvl(SKILL_IDS.SPECIALIZATION_2HAND);
         const dmg = e.increaseAttackDamage || { min: 0, max: 0 };
-        bonus.increaseAttackDamage.max += getPercentage(dmg.max || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
-        bonus.increaseAttackDamage.min += getPercentage(dmg.min || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
-        bonus.increaseAttackDamage.max += getPercentage(dmg.max || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
-        bonus.increaseAttackDamage.min += getPercentage(dmg.min || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        // Phase-C-only calibration, not a real game constant: at max
+        // investment (FIGHTSTYLE_2HAND level 2 + SPECIALIZATION_2HAND level
+        // 1) this damage bonus alone reaches 110% of the weapon's own raw
+        // damage - far larger than the comparable one-handed styles' damage
+        // components (e.g. SPECIALIZATION_WEAPON_SHIELD tops out at 20%),
+        // which aren't modeled here at all since they depend on what's in
+        // the other hand. Left uncompensated, this would systematically
+        // inflate two-handed weapons over one-handed ones in the shared
+        // weapon-slot ranking for reasons that have nothing to do with which
+        // is actually better in combination. Damping just the damage portion
+        // (not the smaller attackChance one below, which isn't the oversized
+        // piece) still credits a real, substantial bonus without one
+        // asymmetric style dominating the comparison.
+        const twoHandDamageWeight = 0.5;
+        bonus.increaseAttackDamage.max += twoHandDamageWeight * getPercentage(dmg.max || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.min += twoHandDamageWeight * getPercentage(dmg.min || 0, fsLevel * SKILL_CONSTANTS.FIGHTSTYLE_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.max += twoHandDamageWeight * getPercentage(dmg.max || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
+        bonus.increaseAttackDamage.min += twoHandDamageWeight * getPercentage(dmg.min || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_DMG_PERCENT, 0);
         bonus.increaseAttackChance += getPercentage(e.increaseAttackChance || 0, specLevel * SKILL_CONSTANTS.SPECIALIZATION_2HAND_AC_PERCENT, 0);
     }
 
