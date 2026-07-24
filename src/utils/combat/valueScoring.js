@@ -35,14 +35,31 @@ export function computeOffenseVector(item) {
 // Phase-C-only calibration, not a real game constant: CombatController's
 // damage roll subtracts damageResistance from *every landed hit*
 // (combatMath.js's getAverageDamagePerHit: Math.max(0, ... - target.
-// damageResistance)), unlike blockChance (a percentage chance to negate one
-// whole hit) or maxHP (a one-time buffer) - its value compounds with however
-// many hits actually land per turn, so weighting it 1:1 against those other
-// dimensions understates it. This multiplier is applied everywhere
-// damageResistance feeds a defense vector (an item's own stats, conditions,
-// and proficiency bonuses alike) so all three stay consistently weighted
-// relative to each other.
-const DAMAGE_RESISTANCE_SCORE_WEIGHT = 3;
+// damageResistance)) - a FLAT reduction, so its proportional value is much
+// bigger against a weak-hitting opponent (a modest resistance value erases
+// most of every hit) than a hard-hitting one (the same flat reduction is a
+// small fraction of the hit). Unlike the rest of this file, the monster to
+// fight is already known before Phase C scoring runs (optimizerWorker.js
+// reads it before calling buildCandidateLists), so this scales the weight
+// with the monster's own average hit damage instead of using one fixed
+// constant for every opponent. REFERENCE_HIT_DAMAGE anchors the scale: at
+// that average hit damage the weight equals BASE_WEIGHT (the flat value
+// this file used before monster-awareness, kept as the calibration point
+// and as the fallback when no monster is supplied - e.g. isNetNegativeCondition's
+// classification below, which shouldn't swing with the opponent). The clamp
+// keeps the weight from blowing up against a near-harmless monster or
+// bottoming out against an overwhelming one.
+const DAMAGE_RESISTANCE_BASE_WEIGHT = 3;
+const DAMAGE_RESISTANCE_REFERENCE_HIT_DAMAGE = 10;
+const DAMAGE_RESISTANCE_MIN_WEIGHT = 1;
+const DAMAGE_RESISTANCE_MAX_WEIGHT = 10;
+
+function getDamageResistanceWeight(monster) {
+    const avgHitDamage = averageRange(monster?.attackDamage);
+    if (!avgHitDamage || avgHitDamage <= 0) return DAMAGE_RESISTANCE_BASE_WEIGHT;
+    const weight = DAMAGE_RESISTANCE_BASE_WEIGHT * (DAMAGE_RESISTANCE_REFERENCE_HIT_DAMAGE / avgHitDamage);
+    return Math.min(DAMAGE_RESISTANCE_MAX_WEIGHT, Math.max(DAMAGE_RESISTANCE_MIN_WEIGHT, weight));
+}
 
 // Vector dimension order: [blockChance, damageResistance, maxHP, maxAP,
 // hitEffect HP recovery, killEffect HP recovery, hitReceivedEffect HP
@@ -51,12 +68,13 @@ const DAMAGE_RESISTANCE_SCORE_WEIGHT = 3;
 // recovery (CombatController.applyAttackHitStatusEffects/
 // ActorStatsController.applyKillEffectsToPlayer) rather than its modest flat
 // equipEffect - without this, such items score too low on raw stats alone to
-// ever surface as optimizer candidates.
-export function computeDefenseVector(item) {
+// ever surface as optimizer candidates. monster (optional) scales the
+// damageResistance dimension - see getDamageResistanceWeight above.
+export function computeDefenseVector(item, monster) {
     const e = item?.equipEffect;
     return [
         e?.increaseBlockChance || 0,
-        (e?.increaseDamageResistance || 0) * DAMAGE_RESISTANCE_SCORE_WEIGHT,
+        (e?.increaseDamageResistance || 0) * getDamageResistanceWeight(monster),
         e?.increaseMaxHP || 0,
         e?.increaseMaxAP || 0,
         averageRange(item?.hitEffect?.increaseCurrentHP),
@@ -96,8 +114,8 @@ function abilityEffectAsOffenseVector(effect) {
     const dmg = effect?.increaseAttackDamage || { min: 0, max: 0 };
     return [dmg.min || 0, dmg.max || 0, effect?.increaseAttackChance || 0, effect?.increaseCriticalSkill || 0, effect?.setCriticalMultiplier || 0, -(effect?.increaseAttackCost || 0), 0];
 }
-function abilityEffectAsDefenseVector(effect) {
-    return [effect?.increaseBlockChance || 0, (effect?.increaseDamageResistance || 0) * DAMAGE_RESISTANCE_SCORE_WEIGHT, effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
+function abilityEffectAsDefenseVector(effect, monster) {
+    return [effect?.increaseBlockChance || 0, (effect?.increaseDamageResistance || 0) * getDamageResistanceWeight(monster), effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
 }
 
 // Weapon/shield/armor proficiency and the two-handed fighting style, folded
@@ -106,10 +124,10 @@ function abilityEffectAsDefenseVector(effect) {
 // which fighting styles are (and aren't) modeled here and why. skillLevels
 // omitted (e.g. call sites that don't have it handy) simply skips this term,
 // matching the pre-existing no-proficiency-bonus scoring.
-export function computeProficiencyVectors(item, slot, skillLevels) {
+export function computeProficiencyVectors(item, slot, skillLevels, monster) {
     if (!skillLevels) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
     const bonus = computeProficiencyBonus(item, slot, skillLevels);
-    return { offense: abilityEffectAsOffenseVector(bonus), defense: abilityEffectAsDefenseVector(bonus) };
+    return { offense: abilityEffectAsOffenseVector(bonus), defense: abilityEffectAsDefenseVector(bonus, monster) };
 }
 
 function addVectors(a, b) {
@@ -124,13 +142,13 @@ function addVectors(a, b) {
 // (summed to a scalar for ranking) and pruneCandidates' Pareto-frontier
 // dominance checks below, so a pruning decision is always consistent with
 // how items actually get ranked.
-export function computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
-    const procVectors = computeProcConditionVectors(item, conditionsById);
-    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts);
-    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels);
+export function computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
+    const procVectors = computeProcConditionVectors(item, conditionsById, monster);
+    const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts, monster);
+    const proficiencyVectors = computeProficiencyVectors(item, slot, skillLevels, monster);
     const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
     const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
-    const defenseVec = scaleOffHandStats(computeDefenseVector(item), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
+    const defenseVec = scaleOffHandStats(computeDefenseVector(item, monster), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
     return {
         offense: addVectors(addVectors(offenseVec, procVectors.offense), addVectors(equipConditionVectors.offense, proficiencyVectors.offense)),
         defense: addVectors(addVectors(defenseVec, procVectors.defense), addVectors(equipConditionVectors.defense, proficiencyVectors.defense)),
@@ -158,7 +176,7 @@ function getProxyOccupancy(entry) {
 // own offense stats (their attackChance/crit/etc.) is a benefit to *my*
 // defense, and debuffing their defense stats (blockChance/resistance/etc.)
 // benefits *my* offense, mirroring how those stats actually interact in combat.
-function scoreProcConditions(entries, conditionsById, isEnemyEffect) {
+function scoreProcConditions(entries, conditionsById, isEnemyEffect, monster) {
     let offense = [0, 0, 0, 0, 0, 0, 0];
     let defense = [0, 0, 0, 0, 0, 0, 0];
     for (const entry of entries || []) {
@@ -166,7 +184,7 @@ function scoreProcConditions(entries, conditionsById, isEnemyEffect) {
         if (!condition?.abilityEffect || !entry.magnitude || entry.magnitude <= 0) continue;
         const weight = getProxyOccupancy(entry) * entry.magnitude;
         const off = scaleVector(abilityEffectAsOffenseVector(condition.abilityEffect), weight);
-        const def = scaleVector(abilityEffectAsDefenseVector(condition.abilityEffect), weight);
+        const def = scaleVector(abilityEffectAsDefenseVector(condition.abilityEffect, monster), weight);
         if (isEnemyEffect) {
             offense = addVectors(offense, def.map((x) => -x));
             defense = addVectors(defense, off.map((x) => -x));
@@ -210,7 +228,7 @@ export function isNetNegativeCondition(condition) {
 // slot could just as easily bring the same debuff on its own. Net-positive
 // conditions get no such discount - full credit every time, since
 // over-crediting a shared buff isn't the problem being corrected for.
-export function computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts) {
+export function computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts, monster) {
     let offense = [0, 0, 0, 0, 0, 0, 0];
     let defense = [0, 0, 0, 0, 0, 0, 0];
     if (!conditionsById) return { offense, defense };
@@ -218,7 +236,7 @@ export function computeEquipConditionVectors(item, conditionsById, sharedConditi
         const condition = conditionsById[entry.condition];
         if (!condition?.abilityEffect || !entry.magnitude || entry.magnitude <= 0) continue;
         const offVec = abilityEffectAsOffenseVector(condition.abilityEffect);
-        const defVec = abilityEffectAsDefenseVector(condition.abilityEffect);
+        const defVec = abilityEffectAsDefenseVector(condition.abilityEffect, monster);
         let weight = entry.magnitude;
         if (isNetNegativeCondition(condition)) {
             const slotCount = sharedConditionSlotCounts?.[entry.condition] || 1;
@@ -236,14 +254,14 @@ export function computeEquipConditionVectors(item, conditionsById, sharedConditi
 // abilityEffect; omit it (e.g. call sites that don't have it handy) and
 // these contributions are simply skipped, matching the pre-existing
 // direct-stat-only scoring.
-export function computeProcConditionVectors(item, conditionsById) {
+export function computeProcConditionVectors(item, conditionsById, monster) {
     if (!conditionsById) return { offense: [0, 0, 0, 0, 0, 0, 0], defense: [0, 0, 0, 0, 0, 0, 0] };
     const parts = [
-        scoreProcConditions(item?.hitEffect?.conditionsSource, conditionsById, false),
-        scoreProcConditions(item?.hitEffect?.conditionsTarget, conditionsById, true),
-        scoreProcConditions(item?.killEffect?.conditionsSource, conditionsById, false),
-        scoreProcConditions(item?.hitReceivedEffect?.conditionsSource, conditionsById, false),
-        scoreProcConditions(item?.hitReceivedEffect?.conditionsTarget, conditionsById, true),
+        scoreProcConditions(item?.hitEffect?.conditionsSource, conditionsById, false, monster),
+        scoreProcConditions(item?.hitEffect?.conditionsTarget, conditionsById, true, monster),
+        scoreProcConditions(item?.killEffect?.conditionsSource, conditionsById, false, monster),
+        scoreProcConditions(item?.hitReceivedEffect?.conditionsSource, conditionsById, false, monster),
+        scoreProcConditions(item?.hitReceivedEffect?.conditionsTarget, conditionsById, true, monster),
     ];
     return {
         offense: parts.reduce((acc, p) => addVectors(acc, p.offense), [0, 0, 0, 0, 0, 0, 0]),
@@ -342,7 +360,7 @@ function groupForPruning(items) {
 // items. A single combined vector still correctly keeps genuine tradeoffs
 // (better offense, worse defense, or vice versa) since neither side
 // dominates the other once at least one dimension favors each.
-export function pruneCandidates(items, conditionsById, sharedConditionSlotCounts, slot, skillLevels) {
+export function pruneCandidates(items, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
     const survivors = [];
     for (const group of groupForPruning(items)) {
         if (group.length <= 1) {
@@ -350,7 +368,7 @@ export function pruneCandidates(items, conditionsById, sharedConditionSlotCounts
             continue;
         }
         const vectorFn = (item) => {
-            const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels);
+            const { offense, defense } = computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
             return [...offense, ...defense];
         };
         survivors.push(...paretoFrontier(group, vectorFn));
