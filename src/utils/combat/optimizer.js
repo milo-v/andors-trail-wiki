@@ -343,13 +343,48 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
     const key = (indices) => indices.join(',');
 
     const heap = new MaxHeap();
-    const visited = new Set();
+    // A tuple T's only possible predecessors (one dimension decremented by
+    // 1) all have rank sum exactly one less than T's - so every predecessor
+    // that could ever discover T gets popped (the heap always yields the
+    // global-minimum rank sum next) before T's own rank sum is ever popped.
+    // By the time the first tuple at rank sum R is popped, every tuple at
+    // rank sum < R has therefore already had its full chance to discover
+    // (and dedupe) its rank-sum-R neighbors - nothing later in the search
+    // ever produces a tuple at a rank sum that low again. That means
+    // dedup keys older than the current rank sum can never be needed
+    // again, so bucketing `visited` by rank sum and purging old buckets as
+    // the search advances bounds its memory to a couple of "shells" of the
+    // search space instead of its entire cumulative history. Without this,
+    // a flat Set grows without bound and can hard-crash by exceeding the
+    // JS engine's Set-size ceiling on a large enough "unlimited" search
+    // (observed in production: tens of millions of entries at ~13M of 581B
+    // total combos evaluated).
+    const visitedByRank = new Map();
+    let currentRank = -1;
+    const isVisited = (k, r) => visitedByRank.get(r)?.has(k);
+    const markVisited = (k, r) => {
+        if (!visitedByRank.has(r)) visitedByRank.set(r, new Set());
+        visitedByRank.get(r).add(k);
+    };
+    // Keeps one extra rank sum of headroom below the provably-safe cutoff,
+    // as a cheap safety margin rather than purging the instant it becomes
+    // theoretically unnecessary.
+    const advanceRank = (r) => {
+        if (r <= currentRank) return;
+        currentRank = r;
+        for (const oldRank of visitedByRank.keys()) {
+            if (oldRank < r - 1) visitedByRank.delete(oldRank);
+        }
+    };
+
     const start = dims.map(() => 0);
-    heap.push(-rankSum(start), start);
-    visited.add(key(start));
+    heap.push(0, start);
+    markVisited(key(start), 0);
 
     while (heap.size > 0) {
         const indices = heap.pop();
+        const r = rankSum(indices);
+        advanceRank(r);
         const combo = {};
         dims.forEach((d, i) => Object.assign(combo, d.values[indices[i]]));
         yield combo;
@@ -358,10 +393,11 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
             if (indices[i] + 1 >= dims[i].values.length) continue;
             const next = indices.slice();
             next[i]++;
+            const nextRank = r + 1;
             const nextKey = key(next);
-            if (visited.has(nextKey)) continue;
-            visited.add(nextKey);
-            heap.push(-rankSum(next), next);
+            if (isVisited(nextKey, nextRank)) continue;
+            markVisited(nextKey, nextRank);
+            heap.push(-nextRank, next);
         }
     }
 }
