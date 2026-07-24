@@ -134,6 +134,15 @@ function addVectors(a, b) {
     return a.map((v, i) => v + b[i]);
 }
 
+// Offense vector indices scored by critical hits (criticalSkill,
+// criticalMultiplier - see computeOffenseVector's dimension-order comment).
+// combatMath.js's hasCriticalAttack unconditionally returns false whenever
+// target.isImmuneToCriticalHits is set, regardless of the player's own
+// criticalSkill/criticalMultiplier - against such a monster these stats are
+// entirely dead weight, so computeScoringVectors zeroes them out below
+// rather than crediting a bonus that can never actually trigger.
+const CRITICAL_OFFENSE_DIMS = [3, 4];
+
 // Full context-adjusted offense/defense vectors combining every scoring
 // signal this file computes - base equip stats (off-hand-efficiency
 // scaled), chance-based condition procs, permanent equip-granted
@@ -141,7 +150,10 @@ function addVectors(a, b) {
 // style. The single source of truth for both optimizer.js's combinedScore
 // (summed to a scalar for ranking) and pruneCandidates' Pareto-frontier
 // dominance checks below, so a pruning decision is always consistent with
-// how items actually get ranked.
+// how items actually get ranked. monster (optional) also scales the
+// damage-resistance dimension (see getDamageResistanceWeight) and zeroes
+// out the criticalSkill/criticalMultiplier dimensions entirely when the
+// monster is immune to critical hits.
 export function computeScoringVectors(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
     const procVectors = computeProcConditionVectors(item, conditionsById, monster);
     const equipConditionVectors = computeEquipConditionVectors(item, conditionsById, sharedConditionSlotCounts, monster);
@@ -149,10 +161,12 @@ export function computeScoringVectors(item, conditionsById, sharedConditionSlotC
     const offHandPercent = getOffHandEfficiencyPercent(item, slot, skillLevels);
     const offenseVec = scaleOffHandStats(computeOffenseVector(item), offHandPercent, OFFENSE_SCALED_DIM_COUNT);
     const defenseVec = scaleOffHandStats(computeDefenseVector(item, monster), offHandPercent, DEFENSE_SCALED_DIM_COUNT);
-    return {
-        offense: addVectors(addVectors(offenseVec, procVectors.offense), addVectors(equipConditionVectors.offense, proficiencyVectors.offense)),
-        defense: addVectors(addVectors(defenseVec, procVectors.defense), addVectors(equipConditionVectors.defense, proficiencyVectors.defense)),
-    };
+    let offense = addVectors(addVectors(offenseVec, procVectors.offense), addVectors(equipConditionVectors.offense, proficiencyVectors.offense));
+    const defense = addVectors(addVectors(defenseVec, procVectors.defense), addVectors(equipConditionVectors.defense, proficiencyVectors.defense));
+    if (monster?.isImmuneToCriticalHits) {
+        offense = offense.map((v, i) => (CRITICAL_OFFENSE_DIMS.includes(i) ? 0 : v));
+    }
+    return { offense, defense };
 }
 function scaleVector(v, s) {
     return v.map((x) => x * s);
