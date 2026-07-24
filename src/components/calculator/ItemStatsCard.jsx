@@ -18,6 +18,49 @@ const EQUIP_EFFECT_FIELDS = [
     ['increaseDamageResistance', 'Res'],
 ];
 
+// equipEffect covers only an item's always-on flat stats - hitEffect/
+// killEffect/hitReceivedEffect/useEffect (proc-based, chance-triggered
+// effects) previously weren't shown here at all, making an item's real
+// value (or another item's hidden edge) invisible when comparing two
+// items that otherwise look identical on flat stats.
+const PROC_EFFECT_FIELDS = [
+    ['hitEffect', 'On hit'],
+    ['killEffect', 'On kill'],
+    ['hitReceivedEffect', 'When hit'],
+    ['useEffect', 'On use'],
+];
+
+function formatRange(range) {
+    if (!range) return null;
+    return `${range.min}-${range.max}`;
+}
+
+function formatChanceDuration(entry) {
+    const parts = [];
+    if (entry.chance != null) parts.push(`${entry.chance}% chance`);
+    if (entry.duration != null) parts.push(`${entry.duration} turns`);
+    return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
+function describeProcEffect(effect, label) {
+    const lines = [];
+    const hp = formatRange(effect.increaseCurrentHP);
+    if (hp) lines.push(`${label}: +${hp} HP`);
+    const ap = formatRange(effect.increaseCurrentAP);
+    if (ap) lines.push(`${label}: +${ap} AP`);
+    const atkHp = formatRange(effect.increaseAttackerCurrentHP);
+    if (atkHp) lines.push(`${label}: ${atkHp} HP to attacker`);
+    const atkAp = formatRange(effect.increaseAttackerCurrentAP);
+    if (atkAp) lines.push(`${label}: ${atkAp} AP to attacker`);
+    (effect.conditionsSource || []).forEach((entry) => {
+        lines.push(`${label} (self): ${entry.link?.name || entry.condition}${entry.magnitude ? ` x${entry.magnitude}` : ''}${formatChanceDuration(entry)}`);
+    });
+    (effect.conditionsTarget || []).forEach((entry) => {
+        lines.push(`${label} (target): ${entry.link?.name || entry.condition}${entry.magnitude ? ` x${entry.magnitude}` : ''}${formatChanceDuration(entry)}`);
+    });
+    return lines;
+}
+
 const styles = {
     backdrop: {
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100,
@@ -44,6 +87,14 @@ export default function ItemStatsCard({ item, top, left, onExclude, onLimit, onC
 
     (equipEffect.addedConditions || []).forEach((entry, i) => {
         stats.push(<li key={`cond${i}`}>{entry.link?.name || entry.condition}{entry.magnitude ? ` x${entry.magnitude}` : ''}</li>);
+    });
+
+    PROC_EFFECT_FIELDS.forEach(([field, label]) => {
+        const effect = item[field];
+        if (!effect) return;
+        describeProcEffect(effect, label).forEach((line, i) => {
+            stats.push(<li key={`${field}${i}`}>{line}</li>);
+        });
     });
 
     return (
