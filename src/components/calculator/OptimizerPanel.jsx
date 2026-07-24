@@ -13,18 +13,16 @@ const SLOT_LABELS = {
     feet: 'Feet', neck: 'Neck', leftring: 'Left ring', rightring: 'Right ring',
 };
 
+// Config fields (locks/filters/excluded/limited/candidatesPerSlot/etc.) are
+// owned by CalculatorPage - a controlled-component pattern, same as
+// build/opponentId - so they can be round-tripped through buildCodec.js's
+// shareable URL alongside the rest of the page's state. Only ephemeral,
+// non-shareable run state (the worker instance, its progress, results, and
+// the item-card popover) stays local to this component.
 export default class OptimizerPanel extends Component {
     constructor(props) {
         super(props);
         this.state = {
-            locks: {},
-            maxItemLevel: '',
-            candidatesPerSlot: String(DEFAULT_CANDIDATES_PER_SLOT),
-            unlimitedCandidates: false,
-            categoryFilters: {},
-            excludedItemIds: [],
-            limitedItemIds: [],
-            maxHpLossPerKill: '',
             running: false,
             error: null,
             evaluated: 0,
@@ -46,28 +44,32 @@ export default class OptimizerPanel extends Component {
         }
     }
 
+    updateConfig(patch) {
+        this.props.onChangeConfig(patch);
+    }
+
     setLock(slot, itemId) {
-        this.setState({ locks: { ...this.state.locks, [slot]: itemId || undefined } });
+        this.updateConfig({ locks: { ...this.props.config.locks, [slot]: itemId || undefined } });
     }
 
     addCategoryFilter(slot, categoryId) {
-        const current = this.state.categoryFilters[slot] || [];
+        const current = this.props.config.categoryFilters[slot] || [];
         if (!categoryId || current.includes(categoryId)) return;
-        this.setState({ categoryFilters: { ...this.state.categoryFilters, [slot]: [...current, categoryId] } });
+        this.updateConfig({ categoryFilters: { ...this.props.config.categoryFilters, [slot]: [...current, categoryId] } });
     }
 
     removeCategoryFilter(slot, categoryId) {
-        const current = this.state.categoryFilters[slot] || [];
-        this.setState({ categoryFilters: { ...this.state.categoryFilters, [slot]: current.filter(id => id !== categoryId) } });
+        const current = this.props.config.categoryFilters[slot] || [];
+        this.updateConfig({ categoryFilters: { ...this.props.config.categoryFilters, [slot]: current.filter(id => id !== categoryId) } });
     }
 
     addExcluded(itemId) {
-        if (!itemId || this.state.excludedItemIds.includes(itemId)) return;
-        this.setState({ excludedItemIds: [...this.state.excludedItemIds, itemId] });
+        if (!itemId || this.props.config.excludedItemIds.includes(itemId)) return;
+        this.updateConfig({ excludedItemIds: [...this.props.config.excludedItemIds, itemId] });
     }
 
     removeExcluded(itemId) {
-        this.setState({ excludedItemIds: this.state.excludedItemIds.filter(id => id !== itemId) });
+        this.updateConfig({ excludedItemIds: this.props.config.excludedItemIds.filter(id => id !== itemId) });
     }
 
     // "Limit 1" items may still appear in the search (unlike excluded items),
@@ -75,12 +77,12 @@ export default class OptimizerPanel extends Component {
     // buildWeaponShieldPairs/buildRingPairs for why that only matters for
     // rings/dual-wielding.
     addLimited(itemId) {
-        if (!itemId || this.state.limitedItemIds.includes(itemId)) return;
-        this.setState({ limitedItemIds: [...this.state.limitedItemIds, itemId] });
+        if (!itemId || this.props.config.limitedItemIds.includes(itemId)) return;
+        this.updateConfig({ limitedItemIds: [...this.props.config.limitedItemIds, itemId] });
     }
 
     removeLimited(itemId) {
-        this.setState({ limitedItemIds: this.state.limitedItemIds.filter(id => id !== itemId) });
+        this.updateConfig({ limitedItemIds: this.props.config.limitedItemIds.filter(id => id !== itemId) });
     }
 
     showCard(item, event) {
@@ -103,23 +105,24 @@ export default class OptimizerPanel extends Component {
             conditionsById[id] = sanitizeConditionForWorker(condition);
         });
 
+        const config = this.props.config;
         const locks = {};
-        Object.entries(this.state.locks).forEach(([slot, itemId]) => { if (itemId) locks[slot] = itemId; });
+        Object.entries(config.locks).forEach(([slot, itemId]) => { if (itemId) locks[slot] = itemId; });
 
-        const maxItemLevel = this.state.maxItemLevel === '' ? undefined : Number(this.state.maxItemLevel);
-        const excludedSet = new Set(this.state.excludedItemIds);
+        const maxItemLevel = config.maxItemLevel === '' ? undefined : Number(config.maxItemLevel);
+        const excludedSet = new Set(config.excludedItemIds);
         const filtersBySlot = {};
         EQUIP_SLOTS.forEach(slot => {
             filtersBySlot[slot] = {
                 maxItemLevel, excludedItemIds: excludedSet,
-                categoryIds: new Set(this.state.categoryFilters[slot] || []),
+                categoryIds: new Set(config.categoryFilters[slot] || []),
             };
         });
 
-        const maxHpLossPerKill = this.state.maxHpLossPerKill === '' ? undefined : Number(this.state.maxHpLossPerKill);
-        const candidatesPerSlot = this.state.unlimitedCandidates
+        const maxHpLossPerKill = config.maxHpLossPerKill === '' ? undefined : Number(config.maxHpLossPerKill);
+        const candidatesPerSlot = config.unlimitedCandidates
             ? null
-            : Math.max(1, Number(this.state.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
+            : Math.max(1, Number(config.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
 
         this.terminateWorker();
         this.worker = new Worker(new URL('../../workers/optimizerWorker.js', import.meta.url));
@@ -146,7 +149,7 @@ export default class OptimizerPanel extends Component {
         try {
             this.worker.postMessage({
                 type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLossPerKill, candidatesPerSlot,
-                limitedItemIds: this.state.limitedItemIds,
+                limitedItemIds: config.limitedItemIds,
             });
         } catch (err) {
             // Most likely a DataCloneError - some field on the monster/items/build
@@ -163,11 +166,12 @@ export default class OptimizerPanel extends Component {
     }
 
     render() {
-        const { items, monster, onApplyBuild } = this.props;
+        const { items, monster, onApplyBuild, config } = this.props;
         const {
             locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
-            maxHpLossPerKill, running, error, evaluated, total, top10, cardItem, cardPosition,
-        } = this.state;
+            maxHpLossPerKill,
+        } = config;
+        const { running, error, evaluated, total, top10, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
@@ -219,15 +223,15 @@ export default class OptimizerPanel extends Component {
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Max item level</label>
                     <input type="number" step="5" value={maxItemLevel}
-                        onChange={e => this.setState({ maxItemLevel: e.target.value })} placeholder="No cap" />
+                        onChange={e => this.updateConfig({ maxItemLevel: e.target.value })} placeholder="No cap" />
                 </div>
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Candidates per slot</label>
                     <input type="number" min="1" step="1" value={candidatesPerSlot} disabled={unlimitedCandidates}
-                        onChange={e => this.setState({ candidatesPerSlot: e.target.value })} />
+                        onChange={e => this.updateConfig({ candidatesPerSlot: e.target.value })} />
                     <label style={{ marginLeft: 10 }}>
                         <input type="checkbox" checked={unlimitedCandidates}
-                            onChange={e => this.setState({ unlimitedCandidates: e.target.checked })} />
+                            onChange={e => this.updateConfig({ unlimitedCandidates: e.target.checked })} />
                         {' '}Unlimited
                     </label>
                 </div>
@@ -272,7 +276,7 @@ export default class OptimizerPanel extends Component {
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Max HP loss/kill</label>
                     <input type="number" value={maxHpLossPerKill}
-                        onChange={e => this.setState({ maxHpLossPerKill: e.target.value })} placeholder="No limit" />
+                        onChange={e => this.updateConfig({ maxHpLossPerKill: e.target.value })} placeholder="No limit" />
                 </div>
                 <button disabled={!monster || running} onClick={() => this.run()}>Run optimizer</button>
                 {running && <button onClick={() => this.cancel()}>Cancel</button>}

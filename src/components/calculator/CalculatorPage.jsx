@@ -40,6 +40,10 @@ export default class CalculatorPage extends Component {
         this.setState({ build: { ...this.state.build, ...patch } }, () => this.syncUrl());
     }
 
+    updateOptimizerConfig(patch) {
+        this.setState({ optimizerConfig: { ...this.state.optimizerConfig, ...patch } }, () => this.syncUrl());
+    }
+
     handleLevelChange(level) {
         const levelUpChoices = reconcileLevelUpChoices(level, this.state.build.levelUpChoices);
         let skillLevels = reconcileSkillLevels(level, this.state.build.skillLevels);
@@ -55,7 +59,7 @@ export default class CalculatorPage extends Component {
     }
 
     syncUrl() {
-        const query = encodeBuildToQuery(this.state.build, this.state.opponentId);
+        const query = encodeBuildToQuery(this.state.build, this.state.opponentId, this.state.optimizerConfig);
         this.props.history.replace({ pathname: '/calculator', search: query });
     }
 
@@ -71,7 +75,7 @@ export default class CalculatorPage extends Component {
     }
 
     render() {
-        const { build, opponentId } = this.state;
+        const { build, opponentId, optimizerConfig } = this.state;
         const monster = this.props.monsters.find(m => m.id === opponentId) || null;
 
         const levelUpChoicesSum = getLevelUpChoicesSum(build.levelUpChoices);
@@ -124,6 +128,8 @@ export default class CalculatorPage extends Component {
                             build={build}
                             conditionsById={this.getConditionsById()}
                             onApplyBuild={equipment => this.updateBuild({ equipment })}
+                            config={optimizerConfig}
+                            onChangeConfig={patch => this.updateOptimizerConfig(patch)}
                         />
                     </div>
                     <div style={{ flex: '1 1 280px', minWidth: 260 }}>

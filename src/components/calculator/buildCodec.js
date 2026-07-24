@@ -1,15 +1,33 @@
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
 import { SKILL_IDS, SKILL_META } from '../../utils/combat/skillData';
 import { createEmptyBuild, reconcileLevelUpChoices, reconcileSkillLevels, reconcileFortitudeLevels } from './buildHelpers';
+import { DEFAULT_CANDIDATES_PER_SLOT } from '../../utils/combat/optimizer';
 
-export function encodeBuildToQuery(build, opponentId) {
-    const json = JSON.stringify({ build, opponentId });
+// Mirrors OptimizerPanel's own initial state - kept here (not buildHelpers.js)
+// since optimizer.js already imports buildHelpers.js for getItemsForSlot, and
+// this file importing optimizer.js back would be a circular import if placed
+// there instead.
+export function createEmptyOptimizerConfig() {
+    return {
+        locks: {},
+        maxItemLevel: '',
+        candidatesPerSlot: String(DEFAULT_CANDIDATES_PER_SLOT),
+        unlimitedCandidates: false,
+        categoryFilters: {},
+        excludedItemIds: [],
+        limitedItemIds: [],
+        maxHpLossPerKill: '',
+    };
+}
+
+export function encodeBuildToQuery(build, opponentId, optimizerConfig) {
+    const json = JSON.stringify({ build, opponentId, optimizerConfig });
     const encoded = btoa(unescape(encodeURIComponent(json)));
     return `?b=${encoded}`;
 }
 
 export function decodeBuildFromQuery(search, items, monsters, conditions) {
-    const empty = { build: createEmptyBuild(), opponentId: null };
+    const empty = { build: createEmptyBuild(), opponentId: null, optimizerConfig: createEmptyOptimizerConfig() };
     const params = new URLSearchParams(search);
     const raw = params.get('b');
     if (!raw) return empty;
@@ -74,5 +92,32 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
 
     const opponentId = monsterIds.has(payload.opponentId) ? payload.opponentId : null;
 
-    return { build, opponentId };
+    const optimizerConfig = createEmptyOptimizerConfig();
+    const srcOpt = payload.optimizerConfig;
+    if (srcOpt && typeof srcOpt === 'object') {
+        if (srcOpt.locks && typeof srcOpt.locks === 'object') {
+            for (const slot of EQUIP_SLOTS) {
+                const itemId = srcOpt.locks[slot];
+                if (itemId && itemIds.has(itemId)) optimizerConfig.locks[slot] = itemId;
+            }
+        }
+        if (typeof srcOpt.maxItemLevel === 'string') optimizerConfig.maxItemLevel = srcOpt.maxItemLevel;
+        if (typeof srcOpt.candidatesPerSlot === 'string') optimizerConfig.candidatesPerSlot = srcOpt.candidatesPerSlot;
+        if (typeof srcOpt.unlimitedCandidates === 'boolean') optimizerConfig.unlimitedCandidates = srcOpt.unlimitedCandidates;
+        if (srcOpt.categoryFilters && typeof srcOpt.categoryFilters === 'object') {
+            for (const slot of EQUIP_SLOTS) {
+                const list = srcOpt.categoryFilters[slot];
+                if (Array.isArray(list)) optimizerConfig.categoryFilters[slot] = list.filter(id => typeof id === 'string');
+            }
+        }
+        if (Array.isArray(srcOpt.excludedItemIds)) {
+            optimizerConfig.excludedItemIds = srcOpt.excludedItemIds.filter(id => itemIds.has(id));
+        }
+        if (Array.isArray(srcOpt.limitedItemIds)) {
+            optimizerConfig.limitedItemIds = srcOpt.limitedItemIds.filter(id => itemIds.has(id));
+        }
+        if (typeof srcOpt.maxHpLossPerKill === 'string') optimizerConfig.maxHpLossPerKill = srcOpt.maxHpLossPerKill;
+    }
+
+    return { build, opponentId, optimizerConfig };
 }
