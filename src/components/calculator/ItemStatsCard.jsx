@@ -5,6 +5,7 @@ import Icon from '../Icon';
 // stat means the same thing in both places.
 const EQUIP_EFFECT_FIELDS = [
     ['increaseAttackCost', 'Atk Cost'],
+    ['increaseAttackDamage', 'Dmg'],
     ['increaseAttackChance', 'AC'],
     ['increaseBlockChance', 'BC'],
     ['increaseCriticalSkill', 'Crit'],
