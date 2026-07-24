@@ -1,4 +1,5 @@
 import React from 'react';
+import { HashLink as Link } from 'react-router-hash-link';
 import Icon from '../Icon';
 
 // Field labels mirror ItemsTable.jsx's equipEffect columns, so the same
@@ -62,6 +63,33 @@ function describeProcEffect(effect, label) {
     return lines;
 }
 
+// item.droplists is populated by Main.linkTemp(): each entry's `.droplist.links`
+// is the list of monsters/containers (or quest-giving monsters, for quest
+// rewards) that can yield this item, mirroring items/ExpandingName.jsx's
+// getEnemyList - kept in sync so "sources" means the same thing here and there.
+function getSources(item) {
+    const sources = [];
+    (item.droplists || []).forEach((entry) => {
+        entry.droplist?.links?.forEach((monster) => {
+            sources.push({ monster, entry });
+        });
+    });
+    return sources;
+}
+
+function formatQuantity(quantity) {
+    if (!quantity) return null;
+    if (quantity.max === quantity.min) return `${quantity.max}x`;
+    return `${quantity.min}-${quantity.max}x`;
+}
+
+function formatSourceDetail(entry, monster) {
+    if (entry.type) return entry.type;
+    if (!monster?.maxHP) return 'sell';
+    if (entry.chance == null) return null;
+    return (typeof entry.chance === 'string' && entry.chance.indexOf('/') > 0) ? entry.chance : `${entry.chance}%`;
+}
+
 const styles = {
     backdrop: {
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100,
@@ -98,6 +126,8 @@ export default function ItemStatsCard({ item, top, left, onExclude, onLimit, onC
         });
     });
 
+    const sources = getSources(item);
+
     return (
         <React.Fragment>
             <div style={styles.backdrop} onClick={onClose} />
@@ -106,9 +136,24 @@ export default function ItemStatsCard({ item, top, left, onExclude, onLimit, onC
                     <div style={{ width: 32, height: 32 }}><Icon data={item} /></div>
                     <strong>{item.name}</strong>
                 </div>
+                {item.priceCost ? <p style={styles.statList}>Price: {item.priceCost} gold</p> : null}
                 {stats.length > 0
                     ? <ul style={styles.statList}>{stats}</ul>
                     : <p style={styles.statList}>No equip effects.</p>}
+                {sources.length > 0 && (
+                    <React.Fragment>
+                        <p style={{ ...styles.statList, marginBottom: 2 }}>Sources:</p>
+                        <ul style={styles.statList}>
+                            {sources.map(({ monster, entry }, i) => (
+                                <li key={i}>
+                                    <Link to={monster.rootLink + monster.id}>{monster.name}</Link>
+                                    {formatQuantity(entry.quantity) ? ` ${formatQuantity(entry.quantity)}` : ''}
+                                    {formatSourceDetail(entry, monster) ? ` (${formatSourceDetail(entry, monster)})` : ''}
+                                </li>
+                            ))}
+                        </ul>
+                    </React.Fragment>
+                )}
                 <button type="button" onClick={onExclude}>Add to exclude list</button>
                 {' '}
                 <button type="button" onClick={onLimit}>Limit to 1 copy</button>
