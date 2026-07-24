@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      stable_ref:
+        description: 'Pin the stable dataset (served by the site''s normal routes) to this game-repo git ref (tag, branch, or commit SHA). Leave empty to keep the current pin - /dev always tracks live master regardless.'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -20,25 +25,49 @@ env:
   GAME_REPO: AndorsTrailRelease/andors-trail
 
 jobs:
+  # Schedule-only: decides whether a nightly run has anything worth
+  # rebuilding for, for either dataset, so a quiet night doesn't produce a
+  # no-op redeploy. push/workflow_dispatch always proceed straight to
+  # build-deploy regardless of this job.
   check-version:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.compare.outputs.changed }}
+      dev_changed: ${{ steps.compare-dev.outputs.changed }}
+      stable_changed: ${{ steps.compare-stable.outputs.changed }}
+      stable_ref: ${{ steps.compare-stable.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compare upstream game version to committed .env
-        id: compare
+      - name: Compare upstream game version to committed dev version
+        id: compare-dev
         run: |
           UPSTREAM_VERSION=$(curl -sL "https://raw.githubusercontent.com/${GAME_REPO}/master/AndorsTrail/app/src/main/AndroidManifest.xml" | grep -oP 'android:versionName="\K[^"]+' || true)
           if [ -z "$UPSTREAM_VERSION" ]; then
             echo "Could not read upstream version" >&2
             exit 1
           fi
-          CURRENT_VERSION=$(grep -oP 'REACT_APP_AT_VERSION=\K.+' .env || true)
-          echo "Upstream: $UPSTREAM_VERSION / Current: $CURRENT_VERSION"
+          CURRENT_VERSION=$(grep -oP 'REACT_APP_AT_VERSION_DEV=\K.+' .env || true)
+          echo "Upstream: $UPSTREAM_VERSION / Current dev: $CURRENT_VERSION"
           if [ "$UPSTREAM_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute stable's 4-months-lagged pin
+        id: compare-stable
+        run: |
+          git clone "https://github.com/${GAME_REPO}.git" ../game-repo-history
+          TARGET_REF=$(git -C ../game-repo-history rev-list -1 --before="4 months ago" origin/master)
+          if [ -z "$TARGET_REF" ]; then
+            echo "Could not resolve a commit from 4 months ago" >&2
+            exit 1
+          fi
+          CURRENT_REF=$(cat .stable-ref 2>/dev/null || true)
+          echo "4-months-ago target: $TARGET_REF / Current stable pin: $CURRENT_REF"
+          echo "ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+          if [ "$TARGET_REF" != "$CURRENT_REF" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -49,7 +78,7 @@ jobs:
     if: |
       always() &&
       needs.check-version.result != 'failure' &&
-      (github.event_name != 'schedule' || needs.check-version.outputs.changed == 'true')
+      (github.event_name != 'schedule' || needs.check-version.outputs.dev_changed == 'true' || needs.check-version.outputs.stable_changed == 'true')
     runs-on: ubuntu-latest
     env:
       NODE_OPTIONS: --openssl-legacy-provider
@@ -63,46 +92,109 @@ jobs:
 
       - run: npm ci
 
-      - name: Clone game resources
-        run: git clone --depth 1 "https://github.com/${GAME_REPO}.git" ../andors-trail
+      # Stable's pin only ever moves via a scheduled 4-month-lag advance or an
+      # explicit workflow_dispatch override - a plain push (or a dispatch run
+      # without the input) always keeps the existing pin.
+      - name: Resolve stable's pinned game-repo ref for this run
+        run: |
+          if [ -n "${{ github.event.inputs.stable_ref }}" ]; then
+            REF="${{ github.event.inputs.stable_ref }}"
+            echo "Manual override via workflow_dispatch: $REF"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            REF="${{ needs.check-version.outputs.stable_ref }}"
+            echo "Resolved via nightly 4-month-lag check: $REF"
+          elif [ -f .stable-ref ]; then
+            REF=$(cat .stable-ref)
+            echo "Using existing pin: $REF"
+          else
+            REF=$(git ls-remote "https://github.com/${GAME_REPO}.git" master | cut -f1)
+            echo "No pin recorded yet - bootstrapping from current master HEAD: $REF"
+          fi
+          echo "STABLE_REF=$REF" >> "$GITHUB_ENV"
+
+      - name: Clone stable game resources (pinned)
+        run: |
+          git clone "https://github.com/${GAME_REPO}.git" ../andors-trail
+          git -C ../andors-trail checkout "${STABLE_REF}"
+
+      - name: Clone dev game resources (always live master)
+        run: git clone --depth 1 "https://github.com/${GAME_REPO}.git" ../andors-trail-dev
 
       - name: Link game resources
-        run: make link
+        run: |
+          make link
+          make link_dev
 
-      - name: Update version and regenerate maps (scheduled run only)
+      - name: Update stable version
+        run: node bin/getVersion.js ../andors-trail/AndorsTrail/app/src/main/AndroidManifest.xml REACT_APP_AT_VERSION .env
+
+      - name: Update dev version and regenerate maps (scheduled run only)
         if: github.event_name == 'schedule'
         run: |
-          node bin/getVersion.js
-          mkdir -p public/backgrounds
-          node bin/generateMapImages.js
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .env
-          if ! git diff --cached --quiet -- .env; then
-            git commit -m "Update game version to $(grep -oP 'REACT_APP_AT_VERSION=\K.+' .env)"
-            git push
-          fi
+          node bin/getVersion.js ../andors-trail-dev/AndorsTrail/app/src/main/AndroidManifest.xml REACT_APP_AT_VERSION_DEV .env
+          mkdir -p public/dev/backgrounds
+          AT_PUBLIC_DIR=./public/dev node bin/generateMapImages.js
 
-      - name: Restore cached map backgrounds (non-scheduled runs)
+      - name: Restore cached dev map backgrounds (non-scheduled runs)
         if: github.event_name != 'schedule'
-        id: cache-backgrounds
+        id: cache-dev-backgrounds
         uses: actions/cache@v4
         with:
-          path: public/backgrounds
-          key: backgrounds-${{ hashFiles('.env') }}
+          path: public/dev/backgrounds
+          key: dev-backgrounds-${{ hashFiles('.env') }}
 
-      - name: Generate map images (cache miss)
-        if: github.event_name != 'schedule' && steps.cache-backgrounds.outputs.cache-hit != 'true'
+      - name: Generate dev map images (cache miss)
+        if: github.event_name != 'schedule' && steps.cache-dev-backgrounds.outputs.cache-hit != 'true'
         run: |
-          mkdir -p public/backgrounds
-          node bin/generateMapImages.js
+          mkdir -p public/dev/backgrounds
+          AT_PUBLIC_DIR=./public/dev node bin/generateMapImages.js
 
-      - name: Save generated map backgrounds to cache (scheduled run only)
+      - name: Save generated dev map backgrounds to cache (scheduled run only)
         if: github.event_name == 'schedule'
         uses: actions/cache/save@v4
         with:
+          path: public/dev/backgrounds
+          key: dev-backgrounds-${{ hashFiles('.env') }}
+
+      # Stable barely changes (at most every few months), so its backgrounds
+      # are cached by the exact pinned commit regardless of trigger type -
+      # unlike dev, there's no schedule-only special case here.
+      - name: Restore cached stable map backgrounds
+        id: cache-stable-backgrounds
+        uses: actions/cache@v4
+        with:
           path: public/backgrounds
-          key: backgrounds-${{ hashFiles('.env') }}
+          key: stable-backgrounds-${{ env.STABLE_REF }}
+
+      - name: Generate stable map images (cache miss)
+        if: steps.cache-stable-backgrounds.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p public/backgrounds
+          node bin/generateMapImages.js
+
+      - name: Save generated stable map backgrounds to cache (cache miss)
+        if: steps.cache-stable-backgrounds.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: public/backgrounds
+          key: stable-backgrounds-${{ env.STABLE_REF }}
+
+      # Persist the resolved pin/versions whenever they actually moved -
+      # covers the nightly 4-month auto-advance, a manual stable_ref
+      # override, and dev's scheduled version bump, all in one commit.
+      - name: Persist updated version/pin state
+        run: |
+          CURRENT_PIN=$(cat .stable-ref 2>/dev/null || true)
+          if [ "$CURRENT_PIN" != "${STABLE_REF}" ]; then
+            echo -n "${STABLE_REF}" > .stable-ref
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .env .stable-ref
+          if ! git diff --cached --quiet -- .env .stable-ref; then
+            git commit -m "Update game version tracking (stable $(grep -oP 'REACT_APP_AT_VERSION=\K.+' .env), dev $(grep -oP 'REACT_APP_AT_VERSION_DEV=\K.+' .env))"
+            git push
+          fi
 
       - run: npm run build
 

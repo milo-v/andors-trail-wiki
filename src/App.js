@@ -5,6 +5,7 @@ import XMLParser from 'react-xml-parser';
 import parseXmlMap from './utils/MapParser.jsx';
 import parseGlobalMap from './utils/GlobalMapParser.jsx';
 import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from './utils/dataCache';
+import { DATA_BASE, DISPLAY_VERSION } from './utils/dataBase';
 
 function App() {
   const [data,setData]=useState([]);
@@ -69,7 +70,7 @@ function App() {
         downcounter.tryDo();
       }
     }
-    getXmlData(process.env.PUBLIC_URL+"/xml/worldmap.xml", thenDo);
+    getXmlData(process.env.PUBLIC_URL+DATA_BASE+"/xml/worldmap.xml", thenDo);
   }
 
   const getMaps=(temp, thenDo)=>{
@@ -80,18 +81,18 @@ function App() {
     }};
     getGlobalMap(downcounter);
     maps.forEach((path)=>{
-      getXmlMap(process.env.PUBLIC_URL+path.replace('@','/')+".tmx", path.replace('@xml/',''), downcounter);
+      getXmlMap(process.env.PUBLIC_URL+DATA_BASE+path.replace('@','/')+".tmx", path.replace('@xml/',''), downcounter);
     });
   }
 
-  const appCacheKey = `app-v${CACHE_SCHEMA_VERSION}-${process.env.REACT_APP_AT_VERSION}`;
+  const appCacheKey = `app-v${CACHE_SCHEMA_VERSION}-${DATA_BASE || 'stable'}-${DISPLAY_VERSION}`;
 
   useEffect(()=>{
     getCachedData(appCacheKey).then((cached) => {
       if (cached) {
         setData(cached);
       } else {
-        getXmlData(process.env.PUBLIC_URL+'/values/loadresources.xml', saveTempResources);
+        getXmlData(process.env.PUBLIC_URL+DATA_BASE+'/values/loadresources.xml', saveTempResources);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

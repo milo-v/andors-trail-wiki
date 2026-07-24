@@ -10,10 +10,16 @@ const ZOOM_OUT = 12;
 var counter = 1;
 var counterSize = 0;
 
+// Base public dir this run reads xml/drawable from and writes backgrounds
+// to - defaults to the stable dataset's ./public; set AT_PUBLIC_DIR=
+// ./public/dev to (re)generate the always-current dev dataset's backgrounds
+// instead, without needing a separate copy of this script.
+const PUBLIC_DIR = process.env.AT_PUBLIC_DIR || './public';
+
 function saveCanvas(canvas, fileName) {
     counter++;
     const buffer = canvas.toBuffer('image/jpeg', { quality: 0.8 })
-    fs.writeFileSync('./public/backgrounds/' + fileName +'.jpg', buffer)
+    fs.writeFileSync(PUBLIC_DIR + '/backgrounds/' + fileName +'.jpg', buffer)
 }
 
 function drawCell(context, x, y, cell, layerList, thenDo) {
@@ -25,7 +31,7 @@ function drawCellLayer(context, x, y, cell, thenDo) {
     const tileset = cell.tileset;
     if (!tileset) return thenDo();
 
-    loadImage('./public/drawable/' + tileset.name + '.png').then(image => {
+    loadImage(PUBLIC_DIR + '/drawable/' + tileset.name + '.png').then(image => {
       const dx = cell.localid % tileset.columns;
       const dy = Math.floor(cell.localid / tileset.columns);
 
@@ -76,7 +82,7 @@ function getXmlData(fileName, thenDo) {
 }
 
 const getXmlMap=(name) => {
-    const resource = "./public/xml/" + name + ".tmx";
+    const resource = PUBLIC_DIR + "/xml/" + name + ".tmx";
     const thenDo = (xmlString) => {
         console.log(`[${counter}/${counterSize}] ${name}`);
         var parser = new XMLParser();
@@ -96,7 +102,7 @@ const generateAll = (tmxFolder, force) => {
             fileName = file.split('.');
             if (fileName[1] == 'tmx') {
                 if (force == false){
-                  const exists = fs.existsSync('./public/backgrounds/' + fileName[0] +'.jpg')
+                  const exists = fs.existsSync(PUBLIC_DIR + '/backgrounds/' + fileName[0] +'.jpg')
                   if (exists) {
                     console.log(`[${counter}/${counterSize}] ${fileName[0]} `, ' - ');
                     counter++
@@ -111,7 +117,7 @@ const generateAll = (tmxFolder, force) => {
     });
 }
 
-const tmxFolder = './public/xml/';
+const tmxFolder = PUBLIC_DIR + '/xml/';
 
 var args = process.argv.filter((e,i) => (i >= 2));
 

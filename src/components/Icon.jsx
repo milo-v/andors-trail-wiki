@@ -1,5 +1,6 @@
 import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
+import { DATA_BASE } from '../utils/dataBase';
 
 const custom = {
     monsters_demon1:{x:64, y:64},
@@ -88,7 +89,7 @@ export default class Icon extends React.Component {
         if (!noBackground) {
             style = {
                 ...style,
-                backgroundImage: 'url("'+process.env.PUBLIC_URL+'/drawable/ui_selections.png")',
+                backgroundImage: 'url("'+process.env.PUBLIC_URL+DATA_BASE+'/drawable/ui_selections.png")',
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: (data.iconBg * d.x) + "px 0px",
                 backgroundSize: (d.x * 5) + "px " + d.y + "px",
@@ -112,7 +113,7 @@ export default class Icon extends React.Component {
 }
     const getSrc = (file) => {
         if (!file) return;
-        return process.env.PUBLIC_URL+"/drawable/"+file+".png";
+        return process.env.PUBLIC_URL+DATA_BASE+"/drawable/"+file+".png";
     }
     const getPosition = (i, width, d) => {
         var x = - i % width * d.x;

@@ -4,9 +4,10 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { BrowserRouter } from 'react-router-dom';
+import { DATA_BASE } from './utils/dataBase';
 console.log('ENV: ', process.env)
 ReactDOM.render((
-  <BrowserRouter basename={process.env.PUBLIC_URL}>
+  <BrowserRouter basename={process.env.PUBLIC_URL + DATA_BASE}>
     <App />
   </BrowserRouter>
 ), document.getElementById('root'));
