@@ -32,6 +32,18 @@ export function computeOffenseVector(item) {
     ];
 }
 
+// Phase-C-only calibration, not a real game constant: CombatController's
+// damage roll subtracts damageResistance from *every landed hit*
+// (combatMath.js's getAverageDamagePerHit: Math.max(0, ... - target.
+// damageResistance)), unlike blockChance (a percentage chance to negate one
+// whole hit) or maxHP (a one-time buffer) - its value compounds with however
+// many hits actually land per turn, so weighting it 1:1 against those other
+// dimensions understates it. This multiplier is applied everywhere
+// damageResistance feeds a defense vector (an item's own stats, conditions,
+// and proficiency bonuses alike) so all three stay consistently weighted
+// relative to each other.
+const DAMAGE_RESISTANCE_SCORE_WEIGHT = 3;
+
 // Vector dimension order: [blockChance, damageResistance, maxHP, maxAP,
 // hitEffect HP recovery, killEffect HP recovery, hitReceivedEffect HP
 // recovery]. The proc-based dimensions fold in items like Necklace of the
@@ -44,7 +56,7 @@ export function computeDefenseVector(item) {
     const e = item?.equipEffect;
     return [
         e?.increaseBlockChance || 0,
-        e?.increaseDamageResistance || 0,
+        (e?.increaseDamageResistance || 0) * DAMAGE_RESISTANCE_SCORE_WEIGHT,
         e?.increaseMaxHP || 0,
         e?.increaseMaxAP || 0,
         averageRange(item?.hitEffect?.increaseCurrentHP),
@@ -85,7 +97,7 @@ function abilityEffectAsOffenseVector(effect) {
     return [dmg.min || 0, dmg.max || 0, effect?.increaseAttackChance || 0, effect?.increaseCriticalSkill || 0, effect?.setCriticalMultiplier || 0, -(effect?.increaseAttackCost || 0), 0];
 }
 function abilityEffectAsDefenseVector(effect) {
-    return [effect?.increaseBlockChance || 0, effect?.increaseDamageResistance || 0, effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
+    return [effect?.increaseBlockChance || 0, (effect?.increaseDamageResistance || 0) * DAMAGE_RESISTANCE_SCORE_WEIGHT, effect?.increaseMaxHP || 0, effect?.increaseMaxAP || 0, 0, 0, 0];
 }
 
 // Weapon/shield/armor proficiency and the two-handed fighting style, folded
