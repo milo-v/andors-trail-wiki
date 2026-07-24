@@ -335,6 +335,26 @@ class MaxHeap {
 // visits every combo exactly once if left to run to completion (same total
 // as countCombinations), but interleaves across every dimension instead of
 // getting stuck varying just the fastest one.
+// Hard cap on how many not-yet-evaluated tuples the frontier (heap) may hold
+// at once. Unlike visitedByRank above (which only remembers *keys* and can be
+// safely bucketed/purged), every heap entry has to be kept in full - it's a
+// real pending tuple, needed later to actually yield/evaluate it - so its
+// memory can't be bounded the same way. For enough dimensions (this search
+// has up to 7: the weapon+shield pair, up to 5 single slots, the ring pair)
+// and wide "unlimited" candidate pools, a single rank-sum shell's width grows
+// combinatorially with the dimension count (roughly C(rankSum + dims - 1,
+// dims - 1)) and can already reach tens of millions of entries by rank sum
+// ~50 - long before evaluated count is anywhere near a scale that would
+// exhaust visitedByRank. That's a genuine out-of-memory crash distinct from
+// (and not fixed by) the visited-Set bound above. When the frontier hits this
+// cap, newly discovered neighbors are simply dropped rather than enqueued
+// (deliberately *not* marked visited, so another still-enqueued predecessor -
+// most tuples have several, one per nonzero dimension - can still (re-)
+// discover and enqueue them once the frontier has room again), trading
+// perfect rank-sum ordering/completeness far out in a search that was never
+// going to complete anyway for a memory ceiling that can't be exceeded.
+const MAX_FRONTIER_SIZE = 200000;
+
 function* bestFirstCombos(candidateLists, limitedItemIds, build) {
     const dims = buildDimensions(candidateLists, limitedItemIds, build);
     if (dims.some(d => d.values.length === 0)) return;
@@ -396,6 +416,7 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
             const nextRank = r + 1;
             const nextKey = key(next);
             if (isVisited(nextKey, nextRank)) continue;
+            if (heap.size >= MAX_FRONTIER_SIZE) continue;
             markVisited(nextKey, nextRank);
             heap.push(-nextRank, next);
         }
