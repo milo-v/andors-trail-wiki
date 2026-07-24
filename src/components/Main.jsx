@@ -10,6 +10,7 @@ import expCalculator from './ExpCalculator';
 import './Main.css';
 import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from '../utils/dataCache';
 import WayfinderPage from './wayfinder/WayfinderPage';
+import { DATA_BASE, DISPLAY_VERSION, IS_DEV } from '../utils/dataBase';
 
 const ItemsPage = React.lazy(() => import('./items/ItemsPage.jsx'));
 const ConditionsPage = React.lazy(() => import('./conditions/ConditionsPage'));
@@ -19,7 +20,7 @@ const QuestsPage = React.lazy(() => import('./quests/QuestsPage'));
 const MapPage = React.lazy(() => import('./maps/MapPage'));
 const CalculatorPage = React.lazy(() => import('./calculator/CalculatorPage'));
 
-const MAIN_CACHE_KEY = `main-v${CACHE_SCHEMA_VERSION}-${process.env.REACT_APP_AT_VERSION}`;
+const MAIN_CACHE_KEY = `main-v${CACHE_SCHEMA_VERSION}-${DATA_BASE || 'stable'}-${DISPLAY_VERSION}`;
 
 // const Loading = () => ;
 function Loading (props) {
@@ -95,7 +96,7 @@ export default class Main extends React.Component {
         const that = this;
         downcounter.progress += resource.length;
         await Promise.all(resource.map(
-            path => that.getJsonData(process.env.PUBLIC_URL+path.replace('@','/'), name, that, downcounter)
+            path => that.getJsonData(process.env.PUBLIC_URL+DATA_BASE+path.replace('@','/'), name, that, downcounter)
         ));
 
         this.setState({progress: this.state.progress - resource.length});
@@ -531,7 +532,7 @@ export default class Main extends React.Component {
                     <div style={{float:'left'}}>
                         2022-2025 <a href="https://github.com/reizy/andors-trail-wiki">Reizy</a>, 2026 <a href="https://github.com/milo-v/andors-trail-wiki">MiLo</a>
                     </div>
-                    <div style={{float:'right'}}>Game version {process.env.REACT_APP_AT_VERSION}</div>
+                    <div style={{float:'right'}}>{IS_DEV && 'Dev preview - '}Game version {DISPLAY_VERSION}</div>
                 </div>
             </div> 
         );

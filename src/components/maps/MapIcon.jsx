@@ -1,4 +1,5 @@
 import React from 'react';
+import { DATA_BASE } from '../../utils/dataBase';
 
 export default class Icon extends React.Component {
 
@@ -32,7 +33,7 @@ export default class Icon extends React.Component {
 }
     const getSrc = (file) => {
         if (!file) return;
-        return process.env.PUBLIC_URL+"/drawable/"+file+".png";
+        return process.env.PUBLIC_URL+DATA_BASE+"/drawable/"+file+".png";
     }
     const getPosition = (i, ts, dx, dy, zoom) => {
         var w = ts.width * zoom / 32;

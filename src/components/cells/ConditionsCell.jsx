@@ -1,5 +1,6 @@
 import React from 'react';
 import { HashLink as Link } from 'react-router-hash-link';
+import { DATA_BASE } from '../../utils/dataBase';
 
 const styles = {
     root: {
@@ -23,7 +24,7 @@ const styles = {
 
 const getSrc = (id) => {
     const tmp = id?.split(":")
-    return process.env.PUBLIC_URL+"/drawable/"+tmp[0]+".png";
+    return process.env.PUBLIC_URL+DATA_BASE+"/drawable/"+tmp[0]+".png";
 }
 const getPosition = (id, width) => {
     const tmp = id?.split(":")[1]
