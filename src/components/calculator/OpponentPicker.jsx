@@ -12,7 +12,7 @@ const STAT_ROWS = [
     { key: 'attackCost', label: 'Attack Cost' },
 ];
 
-export default function OpponentPicker({ opponentId, monsters, resolvedStats, onChange }) {
+export default function OpponentPicker({ opponentId, monsters, resolvedStats, onChange, hordeConfig, onChangeHordeConfig }) {
     const options = monsters.map(m => ({ value: m.id, label: m.name }));
     const monster = monsters.find(m => m.id === opponentId) || null;
     return (
@@ -25,6 +25,30 @@ export default function OpponentPicker({ opponentId, monsters, resolvedStats, on
                 allowClear={true}
                 placeholder="Select monster..."
             />
+            <div style={{ marginTop: 8 }}>
+                <label>
+                    <input
+                        type="checkbox"
+                        checked={hordeConfig.enabled}
+                        onChange={e => onChangeHordeConfig({ enabled: e.target.checked })}
+                    />
+                    {' '}Horde
+                </label>
+                {hordeConfig.enabled && (
+                    <span style={{ marginLeft: 10 }}>
+                        <label>Enemies{' '}
+                            <input
+                                type="number"
+                                min="2"
+                                step="1"
+                                value={hordeConfig.size}
+                                onChange={e => onChangeHordeConfig({ size: Math.max(2, Number(e.target.value) || 2) })}
+                                style={{ width: 60 }}
+                            />
+                        </label>
+                    </span>
+                )}
+            </div>
             {monster && resolvedStats ? (
                 <div style={{ marginTop: 8 }}>
                     <div>Attack Damage: {resolvedStats.damagePotential.min}-{resolvedStats.damagePotential.max}</div>
