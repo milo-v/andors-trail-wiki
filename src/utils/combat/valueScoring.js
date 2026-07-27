@@ -61,6 +61,22 @@ function getDamageResistanceWeight(monster) {
     return Math.min(DAMAGE_RESISTANCE_MAX_WEIGHT, Math.max(DAMAGE_RESISTANCE_MIN_WEIGHT, weight));
 }
 
+// Large fixed weight on the three HP-recovery dimensions (hitEffect/
+// killEffect/hitReceivedEffect increaseCurrentHP), so an item with any
+// meaningful positive expected HP recovery reliably outranks non-recovery
+// alternatives in combinedScore and survives selectCandidates' per-slot cap
+// into the real Phase D simulation - Phase D's own hpLossPerKill-first
+// ranking (insertIntoTop10) is what actually confirms whether the item pays
+// off, but Phase C's cheap heuristic needs this weight to avoid discarding
+// it before that real check ever runs. Calibrated high (not tuned to a
+// specific in-game unit) since typical flat equip stats (attack damage,
+// block/attack chance points) run in the single-to-low-double digits, and
+// HP-recovery values run in a similar raw range but represent a
+// categorically different, often build-defining kind of value (sustain that
+// can make hpLossPerKill go negative) that raw-stat scoring alone
+// systematically underrates.
+const HP_RECOVERY_WEIGHT = 20;
+
 // Vector dimension order: [blockChance, damageResistance, maxHP, maxAP,
 // hitEffect HP recovery, killEffect HP recovery, hitReceivedEffect HP
 // recovery]. The proc-based dimensions fold in items like Necklace of the
@@ -77,9 +93,9 @@ export function computeDefenseVector(item, monster) {
         (e?.increaseDamageResistance || 0) * getDamageResistanceWeight(monster),
         e?.increaseMaxHP || 0,
         e?.increaseMaxAP || 0,
-        averageRange(item?.hitEffect?.increaseCurrentHP),
-        averageRange(item?.killEffect?.increaseCurrentHP),
-        averageRange(item?.hitReceivedEffect?.increaseCurrentHP),
+        averageRange(item?.hitEffect?.increaseCurrentHP) * HP_RECOVERY_WEIGHT,
+        averageRange(item?.killEffect?.increaseCurrentHP) * HP_RECOVERY_WEIGHT,
+        averageRange(item?.hitReceivedEffect?.increaseCurrentHP) * HP_RECOVERY_WEIGHT,
     ];
 }
 
@@ -267,7 +283,7 @@ export function computeEquipConditionVectors(item, conditionsById, sharedConditi
         // effects are), so no shared-slot amortization applies here.
         const roundHP = condition.roundEffect?.increaseCurrentHP;
         if (roundHP) {
-            defense[4] += averageRange(roundHP) * entry.magnitude;
+            defense[4] += averageRange(roundHP) * entry.magnitude * HP_RECOVERY_WEIGHT;
         }
     }
     return { offense, defense };
