@@ -3,7 +3,7 @@
 // No RNG: every value here is a closed-form expected value, matching the game's
 // own implementation.
 
-import { resolvePlayerStats, resolveMonsterStats, resolveEquipped, EQUIP_SLOTS } from './statEngine';
+import { resolvePlayerStats, resolveMonsterStats, resolveEquipped, EQUIP_SLOTS, getEquipmentConditions, mergeConditionInstances } from './statEngine';
 import { SKILL_IDS, SKILL_CONSTANTS } from './skillData';
 import { averageRange, getExpectedBoostPerTurn, applyExpectedProcConditions } from './procEffects';
 
@@ -122,12 +122,19 @@ export function getDifficultyLabel(difficulty) {
 
 // --- Derived metrics ---
 
-// Expected HP restored per round from conditions with a positive roundEffect
-// (e.g. a regeneration-style buff). fullRoundEffect ticks are rarer/slower and
-// intentionally excluded here — this is a per-turn estimate, not a full replay.
-function getExpectedConditionHPPerRound(activeConditions, conditionsById) {
+// Expected HP restored (or drained) per round from conditions with a
+// roundEffect (e.g. a regeneration-style buff, or a self-inflicted curse like
+// Necklace of the Undead's Curse of the Undead). fullRoundEffect ticks are
+// rarer/slower and intentionally excluded here — this is a per-turn estimate,
+// not a full replay. mergedConditions: Map<conditionId, magnitude> from
+// mergeConditionInstances - includes both equip-added conditions and
+// user-toggled build.activeConditions, so an item's permanent self-curse is
+// no longer invisible to this estimate the way it was when this only read
+// build.activeConditions directly.
+function getExpectedConditionHPPerRound(mergedConditions, conditionsById) {
     let total = 0;
-    for (const { conditionId, magnitude } of activeConditions || []) {
+    for (const [conditionId, magnitude] of mergedConditions) {
+        if (magnitude <= 0) continue;
         const condition = conditionsById[conditionId];
         const boost = condition?.roundEffect?.increaseCurrentHP;
         if (!boost) continue;
@@ -266,7 +273,11 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     const hpLossPerTurn = getAverageDamagePerTurn(adjustedMonster, adjustedPlayer) + bonusDamageToPlayerPerTurn;
     const turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
 
-    const regenPerTurn = getExpectedConditionHPPerRound(build.activeConditions, conditionsById);
+    const mergedConditions = mergeConditionInstances(
+        [...getEquipmentConditions(equipped), ...(build.activeConditions || [])],
+        conditionsById
+    );
+    const regenPerTurn = getExpectedConditionHPPerRound(mergedConditions, conditionsById);
     let hitEffectHPPerTurn = 0;
     for (const item of playerItems) {
         hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
