@@ -1,8 +1,9 @@
 import { computeScoringVectors, isNetNegativeCondition, pruneCandidates } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
-import { EQUIP_SLOTS, isTwohandWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
+import { EQUIP_SLOTS, isTwohandWeapon, isWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
 import { computeCombatSummary } from './combatMath';
+import { SKILL_IDS } from './skillData';
 
 function sum(vector) {
     return vector.reduce((a, b) => a + b, 0);
@@ -179,6 +180,17 @@ function computeMaxAchievableAP(build, candidateLists) {
 function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemIds, skillLevels, maxAchievableAP) {
     const weapons = weaponCandidates.length > 0 ? weaponCandidates : [null];
     const shields = shieldCandidates.length > 0 ? shieldCandidates : [null];
+    // Dual Wield level 2 gives the off-hand item's stats the same 100%
+    // weight as the main-hand item's (see statEngine.js's applyEquipment/
+    // applyDualWield: main-hand is always applied at 100%, and
+    // DUALWIELD_EFFICIENCY_LEVEL2 is also 100%), so swapping which
+    // one-handed weapon is main vs off produces stat-identical builds at
+    // that level - only below it does the off-hand's reduced efficiency
+    // (25%/50%) make the two orderings genuinely different. Track already-
+    // seen unordered pairs so only one ordering per pair survives.
+    const dwLevel = skillLevels?.[SKILL_IDS.FIGHTSTYLE_DUAL_WIELD] || 0;
+    const dedupeSwaps = dwLevel >= 2;
+    const seenSwappedPairs = new Set();
     const pairs = [];
     for (const weapon of weapons) {
         const twoHanded = !!weapon && isTwohandWeapon(weapon);
@@ -186,6 +198,11 @@ function buildWeaponShieldPairs(weaponCandidates, shieldCandidates, limitedItemI
             if (twoHanded && shield && shieldCandidates.length > 1 && shield !== shieldCandidates[0]) continue;
             if (isDisallowedPair(weapon, shield, limitedItemIds)) continue;
             const effectiveShield = twoHanded ? null : shield;
+            if (dedupeSwaps && weapon && effectiveShield && isWeapon(effectiveShield)) {
+                const swapKey = weapon.id < effectiveShield.id ? `${weapon.id}|${effectiveShield.id}` : `${effectiveShield.id}|${weapon.id}`;
+                if (seenSwappedPairs.has(swapKey)) continue;
+                seenSwappedPairs.add(swapKey);
+            }
             if (maxAchievableAP != null) {
                 const cost = computeWeaponPairAttackCost(weapon, effectiveShield, skillLevels || {});
                 const bonusAP = (weapon?.equipEffect?.increaseMaxAP || 0) + (effectiveShield?.equipEffect?.increaseMaxAP || 0);
