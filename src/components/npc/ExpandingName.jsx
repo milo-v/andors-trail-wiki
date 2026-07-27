@@ -58,7 +58,7 @@ export default class ExpandingName extends React.Component {
                     style={{height: this.fixedHeight}}
                     onClick={this.toggleExpand}
                 >
-                    <img alt="" src="../image/sort_desc.png" />
+                    <img alt="" src={process.env.PUBLIC_URL+"/image/sort_desc.png"} />
                     <span className='expandedText'>{value}</span>
                 </div>
                 <div className="expandedTable">
