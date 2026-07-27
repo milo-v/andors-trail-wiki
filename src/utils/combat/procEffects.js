@@ -72,10 +72,18 @@ export function getExpectedStackCountFiniteHorizon(perAttemptChance, attacksPerT
 // intensity to scale by occupancy/stacks. Magnitudes <= 0 mean the condition
 // isn't actually manifesting as a stat effect, so contribute nothing here
 // (not an inverted-sign contribution).
-export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttemptChance, attacksPerTurn, duration) {
+// cycleLength (optional): in horde mode, the number of rounds until the
+// current monster dies and is replaced by a fresh, zero-stack copy - see
+// docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md. Only
+// stacking conditions get a finite-horizon correction (non-stacking
+// conditions are explicitly descoped in that spec - always steady state).
+export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttemptChance, attacksPerTurn, duration, cycleLength) {
     if (!condition || !itemMagnitude || itemMagnitude <= 0) return 0;
     if (condition.isStacking) {
-        return getExpectedStackCount(perAttemptChance, attacksPerTurn, duration) * itemMagnitude;
+        const stacks = cycleLength != null
+            ? getExpectedStackCountFiniteHorizon(perAttemptChance, attacksPerTurn, duration, cycleLength)
+            : getExpectedStackCount(perAttemptChance, attacksPerTurn, duration);
+        return stacks * itemMagnitude;
     }
     return getProcOccupancy(perAttemptChance, attacksPerTurn, duration) * itemMagnitude;
 }
@@ -84,12 +92,12 @@ export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttem
 // (each { condition, magnitude, duration, chance }) onto `stats`, scaled by
 // its expected value given the triggering actor's hit chance and
 // attacks/turn. `chance` in the parsed JSON is a percent string (e.g. "20").
-export function applyExpectedProcConditions(stats, entries, hitChancePercent, attacksPerTurn, conditionsById) {
+export function applyExpectedProcConditions(stats, entries, hitChancePercent, attacksPerTurn, conditionsById, cycleLength) {
     for (const entry of entries || []) {
         const condition = conditionsById[entry.condition];
         if (!condition?.abilityEffect) continue;
         const perAttemptChance = (hitChancePercent / 100) * (Number(entry.chance) / 100);
-        const magnitude = getExpectedConditionMagnitude(condition, entry.magnitude, perAttemptChance, attacksPerTurn, entry.duration);
+        const magnitude = getExpectedConditionMagnitude(condition, entry.magnitude, perAttemptChance, attacksPerTurn, entry.duration, cycleLength);
         if (magnitude <= 0) continue;
         applyAbilityEffects(stats, condition.abilityEffect, magnitude);
     }
