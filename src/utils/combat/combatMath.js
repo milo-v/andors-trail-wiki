@@ -146,14 +146,26 @@ function getExpectedConditionHPPerRound(mergedConditions, conditionsById) {
 
 // Expected HP restored per kill from equipped items' killEffect -
 // ActorStatsController.applyKillEffectsToPlayer fires once per kill,
-// independent of the Eater skill's own flat per-kill restore. killEffect's
-// other fields (increaseCurrentAP, conditionsSource) aren't modeled: they'd
-// only affect a *subsequent* encounter, which this calculator (one build vs
-// one monster) never simulates.
+// independent of the Eater skill's own flat per-kill restore. Outside horde
+// mode, killEffect's other fields (increaseCurrentAP, conditionsSource)
+// aren't modeled here: they'd only affect a *subsequent* encounter, which a
+// 1v1 fight (this calculator's default) never simulates - a fight against a
+// single monster ends at the kill. In horde mode there IS a next monster
+// (instant replacement), so those fields are modeled too - see
+// getExpectedKillEffectAP and computeCombatSummary's kill-triggered pass.
 function getExpectedKillEffectHP(playerItems) {
     let total = 0;
     for (const item of playerItems) {
         total += averageRange(item.killEffect?.increaseCurrentHP);
+    }
+    return total;
+}
+
+// Same idea as getExpectedKillEffectHP, for killEffect's increaseCurrentAP.
+function getExpectedKillEffectAP(playerItems) {
+    let total = 0;
+    for (const item of playerItems) {
+        total += averageRange(item.killEffect?.increaseCurrentAP);
     }
     return total;
 }
@@ -197,12 +209,20 @@ function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, ba
     }
 }
 
-// Builds the full set of calculator outputs for one player build vs one monster.
-export function computeCombatSummary(build, monster, { itemsById, conditionsById }) {
+// Builds the full set of calculator outputs for one player build vs one
+// monster. `horde` is optional: `{ size }` with size > 1 means the player is
+// fighting `size` simultaneous, endlessly-replaced copies of `monster` (a
+// dead one is instantly replaced, so the attacker count never drops) - see
+// docs/superpowers/specs/2026-07-27-horde-mode-design.md. Omitting it (or
+// `size <= 1`) reproduces the original 1-vs-1 output exactly.
+export function computeCombatSummary(build, monster, { itemsById, conditionsById }, horde) {
     const player = resolvePlayerStats(build, { itemsById, conditionsById });
     const target = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
     const equipped = resolveEquipped(build.equipment, itemsById);
     const playerItems = EQUIP_SLOTS.map(slot => equipped[slot]).filter(Boolean);
+
+    const attackerCount = horde && horde.size > 1 ? horde.size : 1;
+    const hordeActive = attackerCount > 1;
 
     // Base (pre-proc-adjustment) rates - the single-pass inputs every proc
     // formula below uses. Intentionally not recomputed after applying procs:
@@ -213,6 +233,13 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     const baseHitChanceMonster = getAttackHitChance(target, player);
     const baseAttacksPlayer = getAttacksPerTurn(player);
     const baseAttacksMonster = getAttacksPerTurn(target);
+    // A horde's N enemies each independently attack the player every round -
+    // N parallel Bernoulli attack streams at the same per-attempt chance are
+    // exactly equivalent (for every linear EV formula in procEffects.js) to
+    // one stream at N times the rate, so scaling attacksPerTurn is exact,
+    // not an approximation. Only used for effects the MONSTER's hit inflicts
+    // on the PLAYER - see the horde design spec for what does/doesn't scale.
+    const effectiveAttacksMonster = baseAttacksMonster * attackerCount;
 
     // --- AP deltas (re-floor once - the game has no fractional attacks) ---
     let playerBonusAP = 0;
@@ -221,8 +248,13 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     for (const item of playerItems) {
         // Player's own gear firing on the player's hits against the monster.
         playerBonusAP += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentAP, baseHitChancePlayer, baseAttacksPlayer);
-        // Player's gear reacting when the *player* is hit by the monster.
-        playerBonusAP += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentAP, baseHitChanceMonster, baseAttacksMonster);
+        // Player's gear reacting when the *player* is hit by the monster -
+        // scaled: every attacking monster can independently trigger this.
+        playerBonusAP += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentAP, baseHitChanceMonster, effectiveAttacksMonster);
+        // AP drained from *whichever* monster's hit triggered this - a
+        // per-monster effect (each monster has its own AP pool), not scaled -
+        // it's already captured once via the representative monster and the
+        // whole representative monster's output is scaled at the end.
         monsterBonusAP += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseAttackerCurrentAP, baseHitChanceMonster, baseAttacksMonster);
     }
     // Monster's own effects (rare in practice, but the data shape allows it),
@@ -245,11 +277,18 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     for (const item of playerItems) {
         applyExpectedProcConditions(adjustedPlayer, item.hitEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
         applyExpectedProcConditions(adjustedMonster, item.hitEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
-        applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+        // Player's own gear reacting to being hit - scaled (every attacking
+        // monster can independently trigger it).
+        applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
+        // Conditions the player's gear applies to *the attacker* - per-monster
+        // (only affects the representative monster's own stats), not scaled.
         applyExpectedProcConditions(adjustedMonster, item.hitReceivedEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById);
     }
     applyExpectedProcConditions(adjustedMonster, monster.hitEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById);
-    applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById);
+    // Conditions the monster's hit inflicts on the player - the highest-risk
+    // horde effect (e.g. poison/stun stacking from N simultaneous attackers)
+    // - scaled.
+    applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
     applyExpectedProcConditions(adjustedMonster, monster.hitReceivedEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
     applyExpectedProcConditions(adjustedPlayer, monster.hitReceivedEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
 
@@ -269,9 +308,30 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     }
     const bonusDamageToPlayerPerTurn = -getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseAttackerCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
 
+    // Kill-triggered effects (horde only): a kill arrives at rate
+    // 1/turnsToKillMonster once that preliminary rate is known. Applied as
+    // one extra adjustment pass rather than iterating to a converged fixed
+    // point (this file's "not recomputed after applying procs" philosophy
+    // above already accepts the same kind of single-pass approximation for
+    // AP procs). Outside horde mode this never runs - a 1v1 fight ends at
+    // the kill, so there's no "next monster" in the same encounter to
+    // benefit from a kill's AP/condition bonus (killEffect's HP restore is
+    // still modeled outside horde mode via getExpectedKillEffectHP below).
+    let turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
+    if (hordeActive && turnsToKillMonster < 999) {
+        const killRate = 1 / turnsToKillMonster;
+        const killAP = getExpectedKillEffectAP(playerItems) * killRate;
+        if (killAP !== 0) adjustedPlayer.maxAP = Math.max(0, adjustedPlayer.maxAP + killAP);
+        const killConditions = playerItems.flatMap(item => item.killEffect?.conditionsSource || []);
+        applyExpectedProcConditions(adjustedPlayer, killConditions, 100, killRate, conditionsById);
+        turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
+    }
+
     const damagePerTurn = getAverageDamagePerTurn(adjustedPlayer, adjustedMonster) + bonusDamageToMonsterPerTurn;
-    const hpLossPerTurn = getAverageDamagePerTurn(adjustedMonster, adjustedPlayer) + bonusDamageToPlayerPerTurn;
-    const turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
+    // Direct monster damage is the one term that must be scaled as a whole
+    // result (getAverageDamagePerTurn derives the monster's own attack rate
+    // internally, so there's no rate parameter to scale going in).
+    const hpLossPerTurn = getAverageDamagePerTurn(adjustedMonster, adjustedPlayer) * attackerCount + bonusDamageToPlayerPerTurn;
 
     const mergedConditions = mergeConditionInstances(
         [...getEquipmentConditions(equipped), ...(build.activeConditions || [])],
@@ -281,18 +341,28 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     let hitEffectHPPerTurn = 0;
     for (const item of playerItems) {
         hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
-        hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentHP, baseHitChanceMonster, baseAttacksMonster);
+        // HP the player gains from being hit - scaled.
+        hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitReceivedEffect?.increaseCurrentHP, baseHitChanceMonster, effectiveAttacksMonster);
     }
     hitEffectHPPerTurn += getExpectedBoostPerTurn(monster.hitReceivedEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
-    const hpGainPerTurn = regenPerTurn + hitEffectHPPerTurn;
-
-    const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
 
     // Eater skill's per-kill restore is a flat, deterministic bonus; item
     // killEffect HP restores are an expected value (min-max roll), per
     // ActorStatsController.applyKillEffectsToPlayer/applyUseEffect.
     const eaterLevel = build.skillLevels[SKILL_IDS.EATER] || 0;
-    const hpGainPerKill = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH + getExpectedKillEffectHP(playerItems);
+    const hpGainPerKillSingle = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH + getExpectedKillEffectHP(playerItems);
+
+    let hpGainPerTurn = regenPerTurn + hitEffectHPPerTurn;
+    let hpLossPerKill;
+    let hpGainPerKill;
+    if (!hordeActive) {
+        hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
+        hpGainPerKill = hpGainPerKillSingle;
+    } else if (turnsToKillMonster < 999) {
+        // Horde mode only ever reports per-turn numbers - a kill's on-kill
+        // HP bonus is folded in at the rate kills actually happen.
+        hpGainPerTurn += hpGainPerKillSingle / turnsToKillMonster;
+    }
 
     return {
         difficulty,
