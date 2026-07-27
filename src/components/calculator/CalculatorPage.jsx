@@ -44,6 +44,10 @@ export default class CalculatorPage extends Component {
         this.setState({ optimizerConfig: { ...this.state.optimizerConfig, ...patch } }, () => this.syncUrl());
     }
 
+    updateHordeConfig(patch) {
+        this.setState({ hordeConfig: { ...this.state.hordeConfig, ...patch } }, () => this.syncUrl());
+    }
+
     handleLevelChange(level) {
         const levelUpChoices = reconcileLevelUpChoices(level, this.state.build.levelUpChoices);
         let skillLevels = reconcileSkillLevels(level, this.state.build.skillLevels);
@@ -59,7 +63,7 @@ export default class CalculatorPage extends Component {
     }
 
     syncUrl() {
-        const query = encodeBuildToQuery(this.state.build, this.state.opponentId, this.state.optimizerConfig);
+        const query = encodeBuildToQuery(this.state.build, this.state.opponentId, this.state.optimizerConfig, this.state.hordeConfig);
         this.props.history.replace({ pathname: '/calculator', search: query });
     }
 
@@ -75,8 +79,9 @@ export default class CalculatorPage extends Component {
     }
 
     render() {
-        const { build, opponentId, optimizerConfig } = this.state;
+        const { build, opponentId, optimizerConfig, hordeConfig } = this.state;
         const monster = this.props.monsters.find(m => m.id === opponentId) || null;
+        const horde = hordeConfig.enabled && Number(hordeConfig.size) > 1 ? { size: Number(hordeConfig.size) } : undefined;
 
         const levelUpChoicesSum = getLevelUpChoicesSum(build.levelUpChoices);
         const fullyAllocated = levelUpChoicesSum === Math.max(0, build.level - 1);
@@ -89,7 +94,7 @@ export default class CalculatorPage extends Component {
             summary = computeCombatSummary(build, monster, {
                 itemsById: this.getItemsById(),
                 conditionsById: this.getConditionsById(),
-            });
+            }, horde);
         }
 
         return (
@@ -130,6 +135,7 @@ export default class CalculatorPage extends Component {
                             onApplyBuild={equipment => this.updateBuild({ equipment })}
                             config={optimizerConfig}
                             onChangeConfig={patch => this.updateOptimizerConfig(patch)}
+                            hordeConfig={hordeConfig}
                         />
                     </div>
                     <div style={{ flex: '1 1 280px', minWidth: 260 }}>
@@ -141,8 +147,10 @@ export default class CalculatorPage extends Component {
                             monsters={this.props.monsters}
                             resolvedStats={resolvedMonsterStats}
                             onChange={id => this.setOpponentId(id)}
+                            hordeConfig={hordeConfig}
+                            onChangeHordeConfig={patch => this.updateHordeConfig(patch)}
                         />
-                        <ResultsPanel summary={summary} opponentSelected={!!monster} pointsFullyAllocated={fullyAllocated}/>
+                        <ResultsPanel summary={summary} opponentSelected={!!monster} pointsFullyAllocated={fullyAllocated} hordeEnabled={!!horde} />
                     </div>
                 </div>
             </div>
