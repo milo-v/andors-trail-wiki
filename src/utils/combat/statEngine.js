@@ -486,7 +486,7 @@ export function getEquipmentConditions(equipped) {
 // (from equipment and/or manually-tracked active conditions) don't simply add
 // up: conditions flagged isStacking sum their magnitudes, non-stacking
 // conditions keep only the single highest-magnitude instance.
-function mergeConditionInstances(entries, conditionsById) {
+export function mergeConditionInstances(entries, conditionsById) {
     const merged = new Map();
     for (const { conditionId, magnitude } of entries) {
         const condition = conditionsById[conditionId];
