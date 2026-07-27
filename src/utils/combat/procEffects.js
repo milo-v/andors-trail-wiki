@@ -11,12 +11,16 @@
 // - Non-stacking conditions (ActorStatsController.addNonStackableActorCondition):
 //   a new proc replaces/refreshes the existing instance rather than adding to
 //   it, so what matters is the fraction of rounds the condition is *active at
-//   all*. Modeled as a discrete-time alternating renewal process — idle until
-//   a proc, then active for `duration` rounds, with any reproc while active
-//   refreshing back to full duration:
+//   all*. Since a proc lands independently each round with probability q,
+//   "active at round t" is exactly "at least one proc among the last
+//   `duration` rounds" - a memoryless age process (verified by direct
+//   simulation of the described renewal-with-refresh behavior, and against
+//   the actual game source's reset-to-full-duration-on-reproc behavior -
+//   see docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md's
+//   "getProcOccupancy correction" for the derivation this replaced):
 //     q = 1 - (1 - perAttemptChance)^attacksPerTurn   (>=1 proc this round)
 //     r = (1 - q)^duration
-//     occupancy = (1 - r) / (1 - q*r)
+//     occupancy = 1 - r
 //
 // - Stacking conditions (ActorStatsController.addStackableActorCondition):
 //   each round's proc(s) create an independent, parallel-timer instance
@@ -38,7 +42,32 @@ export function getProcOccupancy(perAttemptChance, attacksPerTurn, duration) {
     const q = 1 - Math.pow(1 - perAttemptChance, attacksPerTurn);
     if (q <= 0) return 0;
     const r = Math.pow(1 - q, duration);
-    return (1 - r) / (1 - q * r);
+    return 1 - r;
+}
+
+// Finite-horizon variant of getProcOccupancy, for horde mode: a kill
+// replaces the monster with a fresh, never-triggered copy, so a non-stacking
+// condition can't have been active before round 1 the way steady state
+// assumes - see docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md.
+// "Active at round t" is "at least one proc among the last min(t, duration)
+// rounds" (same sliding-window structure as the corrected steady-state
+// formula above), so averaging over a cycleLength-round cycle (T) reduces to
+// a short closed form: with x = 1-q and m = min(T, duration),
+//   geomSum = sum_{t=1}^{m} x^t = x*(1-x^m)/(1-x)
+//   tailSum = (T > duration) ? (T-duration)*x^duration : 0
+//   occupancy = 1 - (geomSum + tailSum)/T
+// This is exact for any finite T, and converges to the steady-state 1-r as
+// T grows large.
+export function getProcOccupancyFiniteHorizon(perAttemptChance, attacksPerTurn, duration, cycleLength) {
+    if (duration <= 0 || attacksPerTurn <= 0 || perAttemptChance <= 0 || cycleLength <= 0) return 0;
+    const q = 1 - Math.pow(1 - perAttemptChance, attacksPerTurn);
+    if (q <= 0) return 0;
+    const x = 1 - q;
+    const T = cycleLength;
+    const m = Math.min(T, duration);
+    const geomSum = (x * (1 - Math.pow(x, m))) / (1 - x);
+    const tailSum = T > duration ? (T - duration) * Math.pow(x, duration) : 0;
+    return 1 - (geomSum + tailSum) / T;
 }
 
 export function getExpectedStackCount(perAttemptChance, attacksPerTurn, duration) {
