@@ -175,7 +175,6 @@ export default class OptimizerPanel extends Component {
         } = config;
         const { running, error, evaluated, total, top10, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
-        const hordeActive = !!(this.props.hordeConfig && this.props.hordeConfig.enabled && Number(this.props.hordeConfig.size) > 1);
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
         const excludableOptions = items
@@ -277,7 +276,7 @@ export default class OptimizerPanel extends Component {
                     )}
                 </div>
                 <div style={{ marginBottom: 6 }}>
-                    <label style={{ display: 'inline-block', width: 140 }}>Max HP loss/{hordeActive ? 'turn' : 'kill'}</label>
+                    <label style={{ display: 'inline-block', width: 140 }}>Max HP loss/kill</label>
                     <input type="number" value={maxHpLossPerKill}
                         onChange={e => this.updateConfig({ maxHpLossPerKill: e.target.value })} placeholder="No limit" />
                 </div>
@@ -297,7 +296,7 @@ export default class OptimizerPanel extends Component {
                 {top10.length > 0 && (
                     <table style={{ marginTop: 10, width: '100%' }}>
                         <thead>
-                            <tr><th>#</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/{hordeActive ? 'turn' : 'kill'}</th><th>Difficulty</th><th></th></tr>
+                            <tr><th>#</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
                         </thead>
                         <tbody>
                             {top10.map((entry, i) => (
@@ -320,9 +319,7 @@ export default class OptimizerPanel extends Component {
                                         </div>
                                     </td>
                                     <td>{entry.summary.damagePerTurn.toFixed(2)}</td>
-                                    <td>{hordeActive
-                                        ? entry.summary.hpLossPerTurn.toFixed(2)
-                                        : (Number.isFinite(entry.summary.hpLossPerKill) ? entry.summary.hpLossPerKill.toFixed(2) : '∞')}</td>
+                                    <td>{Number.isFinite(entry.summary.hpLossPerKill) ? entry.summary.hpLossPerKill.toFixed(2) : '∞'}</td>
                                     <td>{entry.summary.difficultyLabel}</td>
                                     <td><button onClick={() => onApplyBuild(entry.equipment)}>Apply</button></td>
                                 </tr>

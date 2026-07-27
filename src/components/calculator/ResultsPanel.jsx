@@ -31,13 +31,13 @@ function FormulaNotes({ hordeEnabled }) {
                 per turn, where attacks per turn = ⌊max AP ÷ attack cost⌋.</div>
             <div><strong>HP change per turn</strong> = your HP regen per turn (from active conditions) − the
                 opponent's damage per turn against you.</div>
-            {hordeEnabled ? (
+            <div><strong>HP change per kill</strong> = (your HP regen per turn × turns to kill the opponent) +
+                on-kill HP bonuses (e.g. Corpse Eater) − (the opponent's damage per turn × turns to kill).</div>
+            {hordeEnabled && (
                 <div><strong>Horde mode</strong>: a dead enemy is instantly replaced, so every enemy attacks
-                    you every turn, forever - only a per-turn number applies. On-kill HP/AP/condition bonuses
-                    are folded into the per-turn number at the rate kills actually happen.</div>
-            ) : (
-                <div><strong>HP change per kill</strong> = (your HP regen per turn × turns to kill the opponent) +
-                    on-kill HP bonuses (e.g. Corpse Eater) − (the opponent's damage per turn × turns to kill).</div>
+                    you every turn, forever. On-kill HP/AP/condition bonuses are also folded into the per-turn
+                    number above, at the rate kills actually happen, since kills keep recurring for the rest of
+                    an endless fight.</div>
             )}
         </div>
     );

@@ -114,19 +114,16 @@ export function buildCandidateLists(items, locks, filtersBySlot = {}, candidates
     return result;
 }
 
-// Primary: lower hpLossPerKill (or hpLossPerTurn in horde mode) wins
-// (survivability first). Secondary: higher damagePerTurn breaks ties.
-// hpLossPerKill can be Infinity (can't kill the monster at all, per
-// combatMath.js) - compare for equality before subtracting so two Infinity
-// entries don't produce a NaN comparator result and fall through to the
-// damagePerTurn tiebreak instead. sortMode 'perTurn' (horde mode, where
-// hpLossPerKill doesn't exist) ranks by hpLossPerTurn instead - same shape,
-// different field.
-export function insertIntoTop10(top10, entry, sortMode = 'perKill') {
-    const lossKey = sortMode === 'perTurn' ? 'hpLossPerTurn' : 'hpLossPerKill';
+// Primary: lower hpLossPerKill wins (survivability first). Secondary: higher
+// damagePerTurn breaks ties. hpLossPerKill can be Infinity (can't kill the
+// monster at all, per combatMath.js) - compare for equality before
+// subtracting so two Infinity entries don't produce a NaN comparator result
+// and fall through to the damagePerTurn tiebreak instead. Ranks the same way
+// in horde mode - combatMath.js computes hpLossPerKill there too.
+export function insertIntoTop10(top10, entry) {
     const next = [...top10, entry].sort((a, b) => {
-        const hpA = a.summary[lossKey];
-        const hpB = b.summary[lossKey];
+        const hpA = a.summary.hpLossPerKill;
+        const hpB = b.summary.hpLossPerKill;
         const { damagePerTurn: dptA } = a.summary;
         const { damagePerTurn: dptB } = b.summary;
         if (hpA !== hpB) return hpA - hpB;
@@ -448,8 +445,6 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
     const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde } = options;
-    const sortMode = horde && horde.size > 1 ? 'perTurn' : 'perKill';
-    const lossKey = sortMode === 'perTurn' ? 'hpLossPerTurn' : 'hpLossPerKill';
     const total = countCombinations(candidateLists, limitedItemIds, build);
     let top10 = [];
     let evaluated = 0;
@@ -476,8 +471,8 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
         const candidateBuild = { ...build, equipment };
         const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde);
 
-        if (maxHpLoss === undefined || maxHpLoss === null || summary[lossKey] <= maxHpLoss) {
-            top10 = insertIntoTop10(top10, { equipment, summary }, sortMode);
+        if (maxHpLoss === undefined || maxHpLoss === null || summary.hpLossPerKill <= maxHpLoss) {
+            top10 = insertIntoTop10(top10, { equipment, summary });
         }
 
         if (await tick()) return top10;

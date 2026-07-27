@@ -389,14 +389,16 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     const hpGainPerKillSingle = eaterLevel * SKILL_CONSTANTS.EATER_HEALTH + getExpectedKillEffectHP(playerItems);
 
     let hpGainPerTurn = regenPerTurn + hitEffectHPPerTurn;
-    let hpLossPerKill;
-    let hpGainPerKill;
-    if (!hordeActive) {
-        hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
-        hpGainPerKill = hpGainPerKillSingle;
-    } else if (turnsToKillMonster < 999) {
-        // Horde mode only ever reports per-turn numbers - a kill's on-kill
-        // HP bonus is folded in at the rate kills actually happen.
+    // Same formula regardless of horde: expected HP lost/gained over the
+    // time it takes to land one kill. In horde mode this is reported
+    // *alongside* the per-turn numbers above (rather than replacing them),
+    // since an endless horde still makes both framings meaningful.
+    const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
+    const hpGainPerKill = hpGainPerKillSingle;
+    if (hordeActive && turnsToKillMonster < 999) {
+        // Horde mode additionally folds the on-kill HP bonus into the
+        // per-turn number, at the rate kills actually happen, since kills
+        // keep recurring for the rest of an endless fight.
         hpGainPerTurn += hpGainPerKillSingle / turnsToKillMonster;
     }
 
