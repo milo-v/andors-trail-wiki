@@ -102,10 +102,8 @@ export function getExpectedStackCountFiniteHorizon(perAttemptChance, attacksPerT
 // isn't actually manifesting as a stat effect, so contribute nothing here
 // (not an inverted-sign contribution).
 // cycleLength (optional): in horde mode, the number of rounds until the
-// current monster dies and is replaced by a fresh, zero-stack copy - see
-// docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md. Only
-// stacking conditions get a finite-horizon correction (non-stacking
-// conditions are explicitly descoped in that spec - always steady state).
+// current monster dies and is replaced by a fresh, never-triggered copy -
+// see docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md.
 export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttemptChance, attacksPerTurn, duration, cycleLength) {
     if (!condition || !itemMagnitude || itemMagnitude <= 0) return 0;
     if (condition.isStacking) {
@@ -114,7 +112,10 @@ export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttem
             : getExpectedStackCount(perAttemptChance, attacksPerTurn, duration);
         return stacks * itemMagnitude;
     }
-    return getProcOccupancy(perAttemptChance, attacksPerTurn, duration) * itemMagnitude;
+    const occupancy = cycleLength != null
+        ? getProcOccupancyFiniteHorizon(perAttemptChance, attacksPerTurn, duration, cycleLength)
+        : getProcOccupancy(perAttemptChance, attacksPerTurn, duration);
+    return occupancy * itemMagnitude;
 }
 
 // Applies every entry in a conditionsSource/conditionsTarget-style proc list
