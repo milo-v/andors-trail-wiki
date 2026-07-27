@@ -176,7 +176,11 @@ function getExpectedKillEffectAP(playerItems) {
 // condition to the monster on the player's hit/critical hit; Taunt drains
 // the monster's AP on the monster's miss. Unlike item procs, chance/
 // magnitude/duration are fixed game constants, not read from JSON.
-function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById) {
+// cycleLength (optional, 8th param): threaded through to every proc call in
+// this function - Concussion/Crit1/Crit2 all apply their condition to
+// adjustedMonster, which resets every kill in horde mode. See
+// docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md.
+function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById, cycleLength) {
     const lvl = (id) => build.skillLevels[id] || 0;
 
     const concussionLevel = lvl(SKILL_IDS.CONCUSSION);
@@ -186,7 +190,7 @@ function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, ba
             magnitude: SKILL_CONSTANTS.CONCUSSION_CONDITION_MAGNITUDE,
             duration: SKILL_CONSTANTS.CONCUSSION_CONDITION_DURATION,
             chance: SKILL_CONSTANTS.CONCUSSION_CHANCE_PERCENT * concussionLevel,
-        }], baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+        }], baseHitChancePlayer, baseAttacksPlayer, conditionsById, cycleLength);
     }
 
     const crit1Level = lvl(SKILL_IDS.CRIT1);
@@ -198,13 +202,13 @@ function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, ba
             applyExpectedProcConditions(adjustedMonster, [{
                 condition: 'crit1', magnitude: SKILL_CONSTANTS.CRIT_CONDITION_MAGNITUDE,
                 duration: SKILL_CONSTANTS.CRIT_CONDITION_DURATION, chance: SKILL_CONSTANTS.CRIT1_CHANCE_PERCENT * crit1Level,
-            }], critHitChancePercent, baseAttacksPlayer, conditionsById);
+            }], critHitChancePercent, baseAttacksPlayer, conditionsById, cycleLength);
         }
         if (crit2Level > 0) {
             applyExpectedProcConditions(adjustedMonster, [{
                 condition: 'crit2', magnitude: SKILL_CONSTANTS.CRIT_CONDITION_MAGNITUDE,
                 duration: SKILL_CONSTANTS.CRIT_CONDITION_DURATION, chance: SKILL_CONSTANTS.CRIT2_CHANCE_PERCENT * crit2Level,
-            }], critHitChancePercent, baseAttacksPlayer, conditionsById);
+            }], critHitChancePercent, baseAttacksPlayer, conditionsById, cycleLength);
         }
     }
 }
@@ -271,28 +275,49 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     }
 
     const adjustedPlayer = { ...player, damagePotential: { ...player.damagePotential }, maxAP: Math.max(0, player.maxAP + playerBonusAP) };
-    const adjustedMonster = { ...target, damagePotential: { ...target.damagePotential }, maxAP: Math.max(0, target.maxAP + monsterBonusAP) };
+    const baseMonsterStats = { ...target, damagePotential: { ...target.damagePotential }, maxAP: Math.max(0, target.maxAP + monsterBonusAP) };
 
-    // --- Condition procs (occupancy/stacking math lives in procEffects.js) ---
+    // --- Condition procs landing on the PLAYER (occupancy/stacking math
+    // lives in procEffects.js) - applied once, unconditionally: the
+    // player's identity persists across the whole horde fight, so there's
+    // no reset-on-kill ramp-up issue here, ever.
     for (const item of playerItems) {
         applyExpectedProcConditions(adjustedPlayer, item.hitEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
-        applyExpectedProcConditions(adjustedMonster, item.hitEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
         // Player's own gear reacting to being hit - scaled (every attacking
         // monster can independently trigger it).
         applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
-        // Conditions the player's gear applies to *the attacker* - per-monster
-        // (only affects the representative monster's own stats), not scaled.
-        applyExpectedProcConditions(adjustedMonster, item.hitReceivedEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById);
     }
-    applyExpectedProcConditions(adjustedMonster, monster.hitEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById);
     // Conditions the monster's hit inflicts on the player - the highest-risk
     // horde effect (e.g. poison/stun stacking from N simultaneous attackers)
     // - scaled.
     applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
-    applyExpectedProcConditions(adjustedMonster, monster.hitReceivedEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
     applyExpectedProcConditions(adjustedPlayer, monster.hitReceivedEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
 
-    applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById);
+    // Condition procs landing on the MONSTER: its identity resets every kill
+    // in horde mode (a dead one is instantly replaced by a fresh,
+    // zero-condition copy), so this is rebuilt from `baseMonsterStats` -
+    // once at steady state below to get a preliminary turnsToKillMonster,
+    // and again with that as a finite-horizon cycleLength once horde mode
+    // and killability are confirmed - see
+    // docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md.
+    // cycleLength is undefined for the steady-state build (1v1 behavior,
+    // and horde mode's own first pass).
+    function buildAdjustedMonster(cycleLength) {
+        const monsterStats = { ...baseMonsterStats, damagePotential: { ...baseMonsterStats.damagePotential } };
+        for (const item of playerItems) {
+            applyExpectedProcConditions(monsterStats, item.hitEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById, cycleLength);
+            // Conditions the player's gear applies to *the attacker* - per-
+            // monster (only affects the representative monster's own
+            // stats), not scaled.
+            applyExpectedProcConditions(monsterStats, item.hitReceivedEffect?.conditionsTarget, baseHitChanceMonster, baseAttacksMonster, conditionsById, cycleLength);
+        }
+        applyExpectedProcConditions(monsterStats, monster.hitEffect?.conditionsSource, baseHitChanceMonster, baseAttacksMonster, conditionsById, cycleLength);
+        applyExpectedProcConditions(monsterStats, monster.hitReceivedEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById, cycleLength);
+        applyGeneralCombatSkillProcs(adjustedPlayer, monsterStats, build, baseHitChancePlayer, baseHitChanceMonster, baseAttacksPlayer, conditionsById, cycleLength);
+        return monsterStats;
+    }
+
+    let adjustedMonster = buildAdjustedMonster(undefined);
 
     const difficulty = getMonsterDifficulty(adjustedPlayer, adjustedMonster);
     const difficultyLabel = getDifficultyLabel(difficulty);
@@ -318,6 +343,17 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     // benefit from a kill's AP/condition bonus (killEffect's HP restore is
     // still modeled outside horde mode via getExpectedKillEffectHP below).
     let turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
+
+    // Rebuild the monster's condition-derived stats with a finite-horizon
+    // cycleLength (this preliminary turnsToKillMonster) before the
+    // kill-triggered-effects step below, so that step's own preliminary
+    // rate is computed from the already-corrected monster - see
+    // docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md.
+    if (hordeActive && turnsToKillMonster < 999) {
+        adjustedMonster = buildAdjustedMonster(turnsToKillMonster);
+        turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
+    }
+
     if (hordeActive && turnsToKillMonster < 999) {
         const killRate = 1 / turnsToKillMonster;
         const killAP = getExpectedKillEffectAP(playerItems) * killRate;
