@@ -248,16 +248,27 @@ export function computeEquipConditionVectors(item, conditionsById, sharedConditi
     if (!conditionsById) return { offense, defense };
     for (const entry of item?.equipEffect?.addedConditions || []) {
         const condition = conditionsById[entry.condition];
-        if (!condition?.abilityEffect || !entry.magnitude || entry.magnitude <= 0) continue;
-        const offVec = abilityEffectAsOffenseVector(condition.abilityEffect);
-        const defVec = abilityEffectAsDefenseVector(condition.abilityEffect, monster);
-        let weight = entry.magnitude;
-        if (isNetNegativeCondition(condition)) {
-            const slotCount = sharedConditionSlotCounts?.[entry.condition] || 1;
-            weight = entry.magnitude / slotCount;
+        if (!condition || !entry.magnitude || entry.magnitude <= 0) continue;
+        if (condition.abilityEffect) {
+            const offVec = abilityEffectAsOffenseVector(condition.abilityEffect);
+            const defVec = abilityEffectAsDefenseVector(condition.abilityEffect, monster);
+            let weight = entry.magnitude;
+            if (isNetNegativeCondition(condition)) {
+                const slotCount = sharedConditionSlotCounts?.[entry.condition] || 1;
+                weight = entry.magnitude / slotCount;
+            }
+            offense = addVectors(offense, scaleVector(offVec, weight));
+            defense = addVectors(defense, scaleVector(defVec, weight));
         }
-        offense = addVectors(offense, scaleVector(offVec, weight));
-        defense = addVectors(defense, scaleVector(defVec, weight));
+        // Round-HP effect (e.g. Necklace of the Undead's self-inflicted Curse
+        // of the Undead, -1 to -2 HP/round while worn) is unrelated to
+        // abilityEffect and previously fell through the guard above entirely
+        // - it's per-item (not merged/deduped across slots the way stat
+        // effects are), so no shared-slot amortization applies here.
+        const roundHP = condition.roundEffect?.increaseCurrentHP;
+        if (roundHP) {
+            defense[4] += averageRange(roundHP) * entry.magnitude;
+        }
     }
     return { offense, defense };
 }
