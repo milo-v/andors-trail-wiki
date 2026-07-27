@@ -20,14 +20,18 @@ export function createEmptyOptimizerConfig() {
     };
 }
 
-export function encodeBuildToQuery(build, opponentId, optimizerConfig) {
-    const json = JSON.stringify({ build, opponentId, optimizerConfig });
+export function createEmptyHordeConfig() {
+    return { enabled: false, size: 2 };
+}
+
+export function encodeBuildToQuery(build, opponentId, optimizerConfig, hordeConfig) {
+    const json = JSON.stringify({ build, opponentId, optimizerConfig, hordeConfig });
     const encoded = btoa(unescape(encodeURIComponent(json)));
     return `?b=${encoded}`;
 }
 
 export function decodeBuildFromQuery(search, items, monsters, conditions) {
-    const empty = { build: createEmptyBuild(), opponentId: null, optimizerConfig: createEmptyOptimizerConfig() };
+    const empty = { build: createEmptyBuild(), opponentId: null, optimizerConfig: createEmptyOptimizerConfig(), hordeConfig: createEmptyHordeConfig() };
     const params = new URLSearchParams(search);
     const raw = params.get('b');
     if (!raw) return empty;
@@ -119,5 +123,12 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
         if (typeof srcOpt.maxHpLossPerKill === 'string') optimizerConfig.maxHpLossPerKill = srcOpt.maxHpLossPerKill;
     }
 
-    return { build, opponentId, optimizerConfig };
+    const hordeConfig = createEmptyHordeConfig();
+    const srcHorde = payload.hordeConfig;
+    if (srcHorde && typeof srcHorde === 'object') {
+        if (typeof srcHorde.enabled === 'boolean') hordeConfig.enabled = srcHorde.enabled;
+        if (Number.isInteger(srcHorde.size) && srcHorde.size >= 2) hordeConfig.size = srcHorde.size;
+    }
+
+    return { build, opponentId, optimizerConfig, hordeConfig };
 }
