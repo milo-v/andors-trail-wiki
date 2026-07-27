@@ -46,6 +46,26 @@ export function getExpectedStackCount(perAttemptChance, attacksPerTurn, duration
     return attacksPerTurn * perAttemptChance * duration;
 }
 
+// Finite-horizon variant of getExpectedStackCount, for horde mode: a kill
+// replaces the monster with a fresh, zero-stack copy, so stacks can't ramp
+// up indefinitely the way they can in a real 1v1 fight - see
+// docs/superpowers/specs/2026-07-27-horde-condition-ramp-design.md. A stack
+// created at round s is still alive at round t iff t - s < duration, so the
+// instantaneous expected count at round t (from a zero-stack start) is
+// p * min(t, duration) where p = attacksPerTurn * perAttemptChance.
+// Averaging that over cycleLength (T) rounds gives an exact closed form
+// (not an approximation) that converges to getExpectedStackCount's
+// steady-state p * duration as T grows large.
+export function getExpectedStackCountFiniteHorizon(perAttemptChance, attacksPerTurn, duration, cycleLength) {
+    if (duration <= 0 || attacksPerTurn <= 0 || perAttemptChance <= 0 || cycleLength <= 0) return 0;
+    const p = attacksPerTurn * perAttemptChance;
+    const T = cycleLength;
+    const sum = T <= duration
+        ? (T * (T + 1)) / 2
+        : (duration * (duration + 1)) / 2 + (T - duration) * duration;
+    return (p * sum) / T;
+}
+
 // A proc entry's own `magnitude` can be the game's MAGNITUDE_REMOVE_ALL
 // sentinel (-99, "grants immunity to this condition" - see the equivalent
 // guard in statEngine.js's applyActiveConditions) rather than a literal
