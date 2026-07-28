@@ -279,7 +279,7 @@ const SINGLE_SLOTS = ['head', 'body', 'hand', 'feet', 'neck'];
 // values are either a single-slot object ({ [slot]: item }) or a pre-merged
 // pair object ({ weapon, shield } / { leftring, rightring }) - cartesian()
 // doesn't need to know which.
-function buildDimensions(candidateLists, limitedItemIds, build) {
+export function buildDimensions(candidateLists, limitedItemIds, build) {
     const maxAchievableAP = build ? computeMaxAchievableAP(build, candidateLists) : null;
     const dims = [{ values: buildWeaponShieldPairs(candidateLists.weapon || [], candidateLists.shield || [], limitedItemIds, build?.skillLevels, maxAchievableAP) }];
     for (const slot of SINGLE_SLOTS) {
@@ -289,6 +289,22 @@ function buildDimensions(candidateLists, limitedItemIds, build) {
     }
     dims.push({ values: buildRingPairs(candidateLists.leftring || [], candidateLists.rightring || [], limitedItemIds) });
     return dims;
+}
+
+// Uniform-random sample of one combo across every dimension, independent of
+// combinedScore/rank-sum ordering and with no attempt at deduplication -
+// unlike bestFirstCombos' systematic walk, this is plain Monte Carlo sampling
+// with replacement, which is fine for an explicitly "give me a surprise"
+// mode: an occasional repeat draw is harmless, and avoiding one would need
+// the same kind of visited-set bookkeeping bestFirstCombos already pays a
+// real memory cost for.
+export function pickRandomCombo(dims) {
+    const combo = {};
+    for (const dim of dims) {
+        const idx = Math.floor(Math.random() * dim.values.length);
+        Object.assign(combo, dim.values[idx]);
+    }
+    return combo;
 }
 
 // dims can include an empty pair dimension (buildWeaponShieldPairs/
@@ -456,35 +472,54 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
 }
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
-    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde, startFrom = 0 } = options;
+    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde, startFrom = 0, randomSearchEnabled = false } = options;
     const total = countCombinations(candidateLists, limitedItemIds, build);
-    let top10 = [];
+    let bestFirstTop10 = [];
+    let randomTop10 = [];
 
     // Equipment-independent across the whole search (only build.equipment
     // varies combo-to-combo) - computed once here instead of once per combo.
     // See combatMath.js's computeCombatSummary `precomputed` param.
     const targetStats = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
     const baseStats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
+    // Only built when needed - buildDimensions runs the same weapon/shield
+    // and ring pairing logic bestFirstCombos itself runs internally, so this
+    // is a second (still one-time, not per-combo) call rather than sharing
+    // state with the generator below.
+    const randomDims = randomSearchEnabled ? buildDimensions(candidateLists, limitedItemIds, build) : null;
 
-    // comboIndex is the 1-based ordinal of a combo in bestFirstCombos()'s
-    // deterministic enumeration order - the same order every call with these
-    // exact candidateLists/limitedItemIds/build produces. It doubles as: the
-    // progress bar's "evaluated" count, the buildNumber recorded on each
-    // top10 entry (so a user can note where a good build turned up and pass
-    // that number back in as startFrom next time), and the resume cursor
-    // itself (combos at or before startFrom are skipped without ever calling
-    // computeCombatSummary on them).
+    // comboIndex is the combined 1-based ordinal across BOTH the
+    // deterministic and random streams - it's what gets recorded as each
+    // top10 entry's buildNumber and what startFrom's resume cursor counts
+    // against. deterministicCount/randomCount are tracked separately purely
+    // so the progress bar's percentage still means "how much of the
+    // deterministic search space has been covered" even though random draws
+    // now share the same tick budget.
     let comboIndex = 0;
+    let deterministicCount = 0;
+    let randomCount = 0;
 
-    // Advances comboIndex and periodically yields/reports progress. Returns
-    // true if the caller should stop (search was cancelled).
     const tick = async () => {
         if (comboIndex % yieldEveryN === 0) {
-            if (onProgress) onProgress({ evaluated: comboIndex, total, top10 });
+            if (onProgress) onProgress({ evaluated: deterministicCount, total, top10: bestFirstTop10, randomEvaluated: randomCount, randomTop10 });
             if (shouldCancel && shouldCancel()) return true;
             await new Promise(resolve => setTimeout(resolve, 0));
         }
         return false;
+    };
+
+    // Evaluates one combo (deterministic or random) and inserts it into the
+    // given top10 list if it qualifies. Shared by both call sites below so
+    // scoring/filtering logic can't drift between the two sources.
+    const evaluate = (combo, top10) => {
+        const equipment = {};
+        for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
+        const candidateBuild = { ...build, equipment };
+        const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde, { targetStats, baseStats });
+        if (maxHpLoss === undefined || maxHpLoss === null || summary.hpLossPerKill <= maxHpLoss) {
+            return insertIntoTop10(top10, { equipment, summary, buildNumber: comboIndex });
+        }
+        return top10;
     };
 
     // Every combo bestFirstCombos() yields here is already a valid pairing
@@ -493,23 +528,22 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     // iteration goes straight to scoring (once past the startFrom cursor).
     for (const combo of bestFirstCombos(candidateLists, limitedItemIds, build)) {
         comboIndex++;
-        if (comboIndex <= startFrom) {
-            if (await tick()) return { bestFirst: top10, random: [] };
-            continue;
+        if (comboIndex > startFrom) {
+            bestFirstTop10 = evaluate(combo, bestFirstTop10);
         }
+        deterministicCount++;
+        if (await tick()) return { bestFirst: bestFirstTop10, random: randomTop10 };
 
-        const equipment = {};
-        for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
-        const candidateBuild = { ...build, equipment };
-        const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde, { targetStats, baseStats });
-
-        if (maxHpLoss === undefined || maxHpLoss === null || summary.hpLossPerKill <= maxHpLoss) {
-            top10 = insertIntoTop10(top10, { equipment, summary, buildNumber: comboIndex });
+        if (randomSearchEnabled) {
+            comboIndex++;
+            if (comboIndex > startFrom) {
+                randomTop10 = evaluate(pickRandomCombo(randomDims), randomTop10);
+            }
+            randomCount++;
+            if (await tick()) return { bestFirst: bestFirstTop10, random: randomTop10 };
         }
-
-        if (await tick()) return { bestFirst: top10, random: [] };
     }
 
-    if (onProgress) onProgress({ evaluated: comboIndex, total, top10 });
-    return { bestFirst: top10, random: [] };
+    if (onProgress) onProgress({ evaluated: deterministicCount, total, top10: bestFirstTop10, randomEvaluated: randomCount, randomTop10 });
+    return { bestFirst: bestFirstTop10, random: randomTop10 };
 }
