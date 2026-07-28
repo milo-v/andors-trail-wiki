@@ -1,7 +1,7 @@
 import { computeScoringVectors, isNetNegativeCondition, pruneCandidates } from './valueScoring';
 import { getItemsForSlot } from '../../components/calculator/buildHelpers';
 import { getItemLevel } from './itemLevels';
-import { EQUIP_SLOTS, isTwohandWeapon, isWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills } from './statEngine';
+import { EQUIP_SLOTS, isTwohandWeapon, isWeapon, computeWeaponPairAttackCost, buildBaseStats, applyGeneralCombatSkills, resolveMonsterStats } from './statEngine';
 import { computeCombatSummary } from './combatMath';
 import { SKILL_IDS } from './skillData';
 
@@ -456,17 +456,31 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
 }
 
 export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
-    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde } = options;
+    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde, startFrom = 0 } = options;
     const total = countCombinations(candidateLists, limitedItemIds, build);
     let top10 = [];
-    let evaluated = 0;
 
-    // Advances the evaluated counter and periodically yields/reports progress.
-    // Returns true if the caller should stop (search was cancelled).
+    // Equipment-independent across the whole search (only build.equipment
+    // varies combo-to-combo) - computed once here instead of once per combo.
+    // See combatMath.js's computeCombatSummary `precomputed` param.
+    const targetStats = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+    const baseStats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
+
+    // comboIndex is the 1-based ordinal of a combo in bestFirstCombos()'s
+    // deterministic enumeration order - the same order every call with these
+    // exact candidateLists/limitedItemIds/build produces. It doubles as: the
+    // progress bar's "evaluated" count, the buildNumber recorded on each
+    // top10 entry (so a user can note where a good build turned up and pass
+    // that number back in as startFrom next time), and the resume cursor
+    // itself (combos at or before startFrom are skipped without ever calling
+    // computeCombatSummary on them).
+    let comboIndex = 0;
+
+    // Advances comboIndex and periodically yields/reports progress. Returns
+    // true if the caller should stop (search was cancelled).
     const tick = async () => {
-        evaluated++;
-        if (evaluated % yieldEveryN === 0) {
-            if (onProgress) onProgress({ evaluated, total, top10 });
+        if (comboIndex % yieldEveryN === 0) {
+            if (onProgress) onProgress({ evaluated: comboIndex, total, top10 });
             if (shouldCancel && shouldCancel()) return true;
             await new Promise(resolve => setTimeout(resolve, 0));
         }
@@ -476,20 +490,26 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     // Every combo bestFirstCombos() yields here is already a valid pairing
     // (two-handed-weapon/shield dedup and the limit-1 constraint are both
     // baked into buildDimensions), so there's nothing left to reject - every
-    // iteration goes straight to scoring.
+    // iteration goes straight to scoring (once past the startFrom cursor).
     for (const combo of bestFirstCombos(candidateLists, limitedItemIds, build)) {
+        comboIndex++;
+        if (comboIndex <= startFrom) {
+            if (await tick()) return { bestFirst: top10, random: [] };
+            continue;
+        }
+
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
         const candidateBuild = { ...build, equipment };
-        const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde);
+        const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde, { targetStats, baseStats });
 
         if (maxHpLoss === undefined || maxHpLoss === null || summary.hpLossPerKill <= maxHpLoss) {
-            top10 = insertIntoTop10(top10, { equipment, summary });
+            top10 = insertIntoTop10(top10, { equipment, summary, buildNumber: comboIndex });
         }
 
-        if (await tick()) return top10;
+        if (await tick()) return { bestFirst: top10, random: [] };
     }
 
-    if (onProgress) onProgress({ evaluated, total, top10 });
-    return top10;
+    if (onProgress) onProgress({ evaluated: comboIndex, total, top10 });
+    return { bestFirst: top10, random: [] };
 }
