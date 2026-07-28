@@ -27,7 +27,11 @@ export default class OptimizerPanel extends Component {
             error: null,
             evaluated: 0,
             total: 0,
-            top10: [],
+            top10BestFirst: [],
+            top10Random: [],
+            randomEvaluated: 0,
+            startFrom: '',
+            randomSearchEnabled: false,
             cardItem: null,
         };
         this.worker = null;
@@ -94,6 +98,50 @@ export default class OptimizerPanel extends Component {
         this.setState({ cardItem: null });
     }
 
+    renderResultsTable(title, top10) {
+        if (top10.length === 0) return null;
+        const { items, onApplyBuild } = this.props;
+        const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
+        return (
+            <div style={{ marginTop: 10 }}>
+                <h4>{title}</h4>
+                <table style={{ width: '100%' }}>
+                    <thead>
+                        <tr><th>#</th><th>Build #</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {top10.map((entry, i) => (
+                            <tr key={i}>
+                                <td>{i + 1}</td>
+                                <td>{entry.buildNumber}</td>
+                                <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                                        {EQUIP_SLOTS.map(slot => {
+                                            const item = itemsById[entry.equipment[slot]];
+                                            if (!item) return null;
+                                            return (
+                                                <div key={slot} style={{ width: 24, height: 24, overflow: 'hidden', cursor: 'pointer' }}
+                                                    onClickCapture={e => { e.preventDefault(); e.stopPropagation(); this.showCard(item, e); }}>
+                                                    <div style={{ width: 32, height: 32, transform: 'scale(0.75)', transformOrigin: 'top left' }}>
+                                                        <Icon data={item} />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </td>
+                                <td>{entry.summary.damagePerTurn.toFixed(2)}</td>
+                                <td>{Number.isFinite(entry.summary.hpLossPerKill) ? entry.summary.hpLossPerKill.toFixed(2) : '∞'}</td>
+                                <td>{entry.summary.difficultyLabel}</td>
+                                <td><button onClick={() => onApplyBuild(entry.equipment)}>Apply</button></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
     run() {
         const { items, monster, build } = this.props;
         if (!monster) return;
@@ -125,15 +173,17 @@ export default class OptimizerPanel extends Component {
             : Math.max(1, Number(config.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
         const hordeConfig = this.props.hordeConfig;
         const horde = hordeConfig && hordeConfig.enabled && Number(hordeConfig.size) > 1 ? { size: Number(hordeConfig.size) } : undefined;
+        const startFrom = this.state.startFrom === '' ? 0 : Math.max(0, Number(this.state.startFrom) || 0);
+        const { randomSearchEnabled } = this.state;
 
         this.terminateWorker();
         this.worker = new Worker(new URL('../../workers/optimizerWorker.js', import.meta.url));
         this.worker.onmessage = (event) => {
-            const { type, evaluated, total, top10, message } = event.data;
+            const { type, evaluated, total, top10, randomEvaluated, randomTop10, message } = event.data;
             if (type === 'progress') {
-                this.setState({ evaluated, total, top10 });
+                this.setState({ evaluated, total, top10BestFirst: top10, randomEvaluated: randomEvaluated || 0, top10Random: randomTop10 || [] });
             } else if (type === 'done') {
-                this.setState({ running: false, top10 });
+                this.setState({ running: false, top10BestFirst: top10, top10Random: randomTop10 || [] });
                 this.terminateWorker();
             } else if (type === 'error') {
                 this.setState({ running: false, error: message });
@@ -147,11 +197,11 @@ export default class OptimizerPanel extends Component {
             this.setState({ running: false, error: event.message || 'Optimizer worker crashed' });
             this.terminateWorker();
         };
-        this.setState({ running: true, evaluated: 0, total: 0, top10: [], error: null });
+        this.setState({ running: true, evaluated: 0, total: 0, top10BestFirst: [], top10Random: [], randomEvaluated: 0, error: null });
         try {
             this.worker.postMessage({
                 type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot,
-                limitedItemIds: config.limitedItemIds, horde,
+                limitedItemIds: config.limitedItemIds, horde, startFrom, randomSearchEnabled,
             });
         } catch (err) {
             // Most likely a DataCloneError - some field on the monster/items/build
@@ -168,12 +218,12 @@ export default class OptimizerPanel extends Component {
     }
 
     render() {
-        const { items, monster, onApplyBuild, config } = this.props;
+        const { items, monster, config } = this.props;
         const {
             locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
             maxHpLossPerKill,
         } = config;
-        const { running, error, evaluated, total, top10, cardItem, cardPosition } = this.state;
+        const { running, error, evaluated, total, top10BestFirst, top10Random, randomEvaluated, startFrom, randomSearchEnabled, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
@@ -280,6 +330,19 @@ export default class OptimizerPanel extends Component {
                     <input type="number" value={maxHpLossPerKill}
                         onChange={e => this.updateConfig({ maxHpLossPerKill: e.target.value })} placeholder="No limit" />
                 </div>
+                <div style={{ marginBottom: 6 }}>
+                    <label style={{ display: 'inline-block', width: 140 }}>Start from build #</label>
+                    <input type="number" min="0" step="1" value={startFrom}
+                        onChange={e => this.setState({ startFrom: e.target.value })} placeholder="0" />
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                    <label style={{ display: 'inline-block', width: 140 }}>Random search</label>
+                    <input type="checkbox" checked={randomSearchEnabled}
+                        onChange={e => this.setState({ randomSearchEnabled: e.target.checked })} />
+                    <span style={{ marginLeft: 6, color: '#999' }}>
+                        Splits evaluations 1:1 with a separate fully-random search (slower best-first progress, chance of a surprise find)
+                    </span>
+                </div>
                 <button disabled={!monster || running} onClick={() => this.run()}>Run optimizer</button>
                 {running && <button onClick={() => this.cancel()}>Cancel</button>}
                 {error && (
@@ -290,43 +353,12 @@ export default class OptimizerPanel extends Component {
                         <div style={{ background: '#333', height: 8, width: 300 }}>
                             <div style={{ background: '#4a90d9', height: 8, width: `${percent}%` }} />
                         </div>
-                        <span>{evaluated} / {total} builds evaluated</span>
+                        <span>{evaluated} / {total} best-first builds evaluated</span>
+                        {randomSearchEnabled && <span style={{ marginLeft: 12 }}>{randomEvaluated} random builds also checked</span>}
                     </div>
                 )}
-                {top10.length > 0 && (
-                    <table style={{ marginTop: 10, width: '100%' }}>
-                        <thead>
-                            <tr><th>#</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                            {top10.map((entry, i) => (
-                                <tr key={i}>
-                                    <td>{i + 1}</td>
-                                    <td>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                                            {EQUIP_SLOTS.map(slot => {
-                                                const item = itemsById[entry.equipment[slot]];
-                                                if (!item) return null;
-                                                return (
-                                                    <div key={slot} style={{ width: 24, height: 24, overflow: 'hidden', cursor: 'pointer' }}
-                                                        onClickCapture={e => { e.preventDefault(); e.stopPropagation(); this.showCard(item, e); }}>
-                                                        <div style={{ width: 32, height: 32, transform: 'scale(0.75)', transformOrigin: 'top left' }}>
-                                                            <Icon data={item} />
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </td>
-                                    <td>{entry.summary.damagePerTurn.toFixed(2)}</td>
-                                    <td>{Number.isFinite(entry.summary.hpLossPerKill) ? entry.summary.hpLossPerKill.toFixed(2) : '∞'}</td>
-                                    <td>{entry.summary.difficultyLabel}</td>
-                                    <td><button onClick={() => onApplyBuild(entry.equipment)}>Apply</button></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                )}
+                {this.renderResultsTable('Best-first results', top10BestFirst)}
+                {this.renderResultsTable('Random-search results', top10Random)}
                 {cardItem && (
                     <ItemStatsCard
                         item={cardItem}
