@@ -55,10 +55,22 @@ export const DEFAULT_CANDIDATES_PER_SLOT = 6;
 // ties. This is also the per-dimension order bestFirstCombos() ranks each
 // slot's index by (0 = best), so it doubles as "evaluate the most promising
 // combos first" across every dimension - not just this one slot in isolation.
-function compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
-    const scoreDiff = combinedScore(b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) - combinedScore(a, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
-    if (scoreDiff !== 0) return scoreDiff;
-    return (getItemLevel(b.id) ?? -1) - (getItemLevel(a.id) ?? -1);
+//
+// combinedScore is computed exactly once per item here (a decorate-sort-
+// undecorate / Schwartzian transform) rather than inside the sort
+// comparator, which would recompute it for both operands on every
+// comparison (~2*n*log(n) calls for a pool of n instead of n).
+function sortByCombinedScore(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster) {
+    const decorated = pool.map(item => ({
+        item,
+        score: combinedScore(item, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster),
+    }));
+    decorated.sort((a, b) => {
+        const scoreDiff = b.score - a.score;
+        if (scoreDiff !== 0) return scoreDiff;
+        return (getItemLevel(b.item.id) ?? -1) - (getItemLevel(a.item.id) ?? -1);
+    });
+    return decorated.map(d => d.item);
 }
 
 export function selectCandidates(slot, items, options = {}) {
@@ -83,7 +95,7 @@ export function selectCandidates(slot, items, options = {}) {
     // available. Pruning before these filters would risk losing that
     // alternative to a "best in slot" the player can't even use.
     pool = pruneCandidates(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
-    const sorted = [...pool].sort((a, b) => compareCandidates(a, b, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster));
+    const sorted = sortByCombinedScore(pool, conditionsById, sharedConditionSlotCounts, slot, skillLevels, monster);
     // candidatesPerSlot: null/Infinity means unlimited (no cap); the default
     // above (6) applies whenever the caller doesn't specify one at all.
     return candidatesPerSlot == null || candidatesPerSlot === Infinity
