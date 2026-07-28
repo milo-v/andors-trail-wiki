@@ -611,8 +611,19 @@ export function getEquipmentConditionDetails(equipped) {
 // Full player pipeline, ActorStatsController.recalculatePlayerStats (:275-296) order:
 // base traits -> equipment (incl. fighting styles/dual-wield) -> item proficiencies
 // -> general combat skills -> active conditions -> non-weapon damage modifier -> clamp.
-export function resolvePlayerStats(build, { itemsById, conditionsById }) {
-    const stats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
+// precomputedBaseStats (optional): the output of buildBaseStats(build.level,
+// build.levelUpChoices, build.fortitudeLevels) computed by the caller ahead
+// of time. Level/level-up choices/fortitude never vary across a single
+// optimizer search (only build.equipment does), so a hot loop that calls
+// this once per candidate build can compute buildBaseStats a single time and
+// pass its result in here instead of re-running applyLevelUpChoices on every
+// call. Still needs a fresh clone (including a fresh damagePotential object)
+// per call since this function mutates `stats` in place via applyEquipment
+// etc.
+export function resolvePlayerStats(build, { itemsById, conditionsById }, precomputedBaseStats) {
+    const stats = precomputedBaseStats
+        ? { ...precomputedBaseStats, damagePotential: { ...precomputedBaseStats.damagePotential } }
+        : buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
     const equipped = resolveEquipped(build.equipment, itemsById);
 
     const weaponDamage = applyEquipment(stats, equipped, build.skillLevels);

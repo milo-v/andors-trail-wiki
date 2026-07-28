@@ -219,9 +219,15 @@ function applyGeneralCombatSkillProcs(adjustedPlayer, adjustedMonster, build, ba
 // dead one is instantly replaced, so the attacker count never drops) - see
 // docs/superpowers/specs/2026-07-27-horde-mode-design.md. Omitting it (or
 // `size <= 1`) reproduces the original 1-vs-1 output exactly.
-export function computeCombatSummary(build, monster, { itemsById, conditionsById }, horde) {
-    const player = resolvePlayerStats(build, { itemsById, conditionsById });
-    const target = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+// precomputed (optional): { targetStats, baseStats } - lets a hot-loop caller
+// (optimizer.js's searchBestBuilds) hoist the equipment-independent parts of
+// player/monster stat resolution out of the per-combo loop. See
+// resolvePlayerStats's precomputedBaseStats param above resolveMonsterStats -
+// target is read-only for the rest of this function (only ever spread into
+// copies below), so it's safe to reuse the same object across many calls.
+export function computeCombatSummary(build, monster, { itemsById, conditionsById }, horde, precomputed = {}) {
+    const player = resolvePlayerStats(build, { itemsById, conditionsById }, precomputed.baseStats);
+    const target = precomputed.targetStats || resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
     const equipped = resolveEquipped(build.equipment, itemsById);
     const playerItems = EQUIP_SLOTS.map(slot => equipped[slot]).filter(Boolean);
 
