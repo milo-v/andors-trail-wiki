@@ -9,7 +9,7 @@ Object.entries(FACTION_ALIGNMENT_KEYS).forEach(([faction, keys]) => {
     keys.forEach((key) => { REWARD_KEY_TO_FACTION[key] = faction; });
 });
 
-export function satisfiesRequirement(req, state) {
+function evaluateRequirement(req, state) {
     if (req.requireType === 'questProgress') {
         return state.questProgressOverlay.get(req.requireID)?.has(req.value) || false;
     }
@@ -23,6 +23,11 @@ export function satisfiesRequirement(req, state) {
         return (state.usedBonemealPotions || 0) >= req.value;
     }
     return false;
+}
+
+export function satisfiesRequirement(req, state) {
+    const result = evaluateRequirement(req, state);
+    return req.negate ? !result : result;
 }
 
 function scoresFactionForProgress(value) {
