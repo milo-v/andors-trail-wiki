@@ -19,7 +19,10 @@ export function satisfiesRequirement(req, state) {
     if (req.requireType === 'factionScoreEquals') {
         return (state.alignments.get(req.requireID) || 0) === req.value;
     }
-    return true;
+    if (req.requireType === 'consumedBonemeals') {
+        return (state.usedBonemealPotions || 0) >= req.value;
+    }
+    return false;
 }
 
 function scoresFactionForProgress(value) {
@@ -30,12 +33,12 @@ function scoresFactionForProgress(value) {
     return null;
 }
 
-export function computeFactionState(realQuestProgress, conversations, quests) {
+export function computeFactionState(realQuestProgress, conversations, quests, usedBonemealPotions = 0) {
     const alignments = new Map();
     const questProgressOverlay = new Map();
     realQuestProgress.forEach((set, qid) => questProgressOverlay.set(qid, new Set(set)));
 
-    const state = { alignments, questProgressOverlay };
+    const state = { alignments, questProgressOverlay, usedBonemealPotions };
     const decisions = { shadow: [], feygard: [], thieves: [] };
 
     const describeSource = (source) => {
@@ -85,7 +88,8 @@ export function computeFactionState(realQuestProgress, conversations, quests) {
         visited.add(currentId);
         const node = conversations[currentId];
         if (!node) break;
-        (node.rewards || []).forEach((reward) => applyReward(reward, currentSource));
+        const sourceForThisNode = currentSource;
+        (node.rewards || []).forEach((reward) => applyReward(reward, sourceForThisNode));
 
         const replies = node.replies || [];
         let nextId = null;

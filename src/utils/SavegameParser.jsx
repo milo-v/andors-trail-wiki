@@ -113,6 +113,37 @@ function readMap(r) {
     r.utf();
 }
 
+function readInterface(r) {
+    r.bool();
+    r.bool();
+    const hasPos = r.bool();
+    if (hasPos) readCoord(r);
+    r.utf();
+}
+
+function readStatistics(r) {
+    r.int();
+    const nm = r.int();
+    for (let i = 0; i < nm; i++) {
+        r.utf();
+        r.int();
+    }
+    const ni = r.int();
+    const usedItems = new Map();
+    for (let i = 0; i < ni; i++) {
+        const itemID = r.utf();
+        const count = r.int();
+        usedItems.set(itemID, count);
+    }
+    r.int();
+    r.int();
+    r.bool();
+    r.bool();
+    const clen = r.int();
+    r.pos += clen;
+    return { usedItems };
+}
+
 function readPlayer(r) {
     const p = {};
     r.int();
@@ -209,6 +240,10 @@ export function parseSavegame(arrayBuffer) {
     }
 
     const player = readPlayer(r);
+    r.utf();
+    readInterface(r);
+    const statistics = readStatistics(r);
+    const usedBonemealPotions = (statistics.usedItems.get('bonemeal_potion') || 0) + (statistics.usedItems.get('pot_bm_lodar') || 0);
 
-    return { header, player };
+    return { header, player, usedBonemealPotions };
 }

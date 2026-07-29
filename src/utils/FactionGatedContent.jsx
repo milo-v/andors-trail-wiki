@@ -53,11 +53,13 @@ export function computeGatedContent(state, conversations, monsters) {
                 if (!faction) return;
                 const target = conversations[reply.nextPhraseID];
                 if (!target || !target.message) return;
+                const npc = phraseOwners.get(target.id);
+                if (!npc) return;
                 results.push({
                     faction,
                     message: target.message,
                     requirement: req,
-                    npc: phraseOwners.get(target.id) || null,
+                    npc,
                     unlocked: satisfiesRequirement(req, state),
                 });
             });
