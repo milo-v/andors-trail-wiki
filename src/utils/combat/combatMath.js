@@ -400,7 +400,12 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     // *alongside* the per-turn numbers above (rather than replacing them),
     // since an endless horde still makes both framings meaningful.
     const hpLossPerKill = turnsToKillMonster >= 999 ? Infinity : turnsToKillMonster * hpLossPerTurn;
-    const hpGainPerKill = hpGainPerKillSingle;
+    // Mirrors hpLossPerKill: fold in HP regen/hitEffect healing accrued
+    // over the whole fight (not just the flat on-kill bonus), matching the
+    // "HP change per kill" formula documented in ResultsPanel.jsx.
+    const hpGainPerKill = turnsToKillMonster >= 999
+        ? hpGainPerKillSingle
+        : turnsToKillMonster * (regenPerTurn + hitEffectHPPerTurn) + hpGainPerKillSingle;
     if (hordeActive && turnsToKillMonster < 999) {
         // Horde mode additionally folds the on-kill HP bonus into the
         // per-turn number, at the rate kills actually happen, since kills
