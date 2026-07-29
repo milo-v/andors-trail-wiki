@@ -19,6 +19,7 @@ const NpcPage = React.lazy(() => import('./npc/NpcPage'));
 const QuestsPage = React.lazy(() => import('./quests/QuestsPage'));
 const MapPage = React.lazy(() => import('./maps/MapPage'));
 const CalculatorPage = React.lazy(() => import('./calculator/CalculatorPage'));
+const FactionCheckPage = React.lazy(() => import('./factioncheck/FactionCheckPage'));
 
 const MAIN_CACHE_KEY = `main-v${CACHE_SCHEMA_VERSION}-${DATA_BASE || 'stable'}-${DISPLAY_VERSION}`;
 
@@ -517,6 +518,8 @@ export default class Main extends React.Component {
                                     <PropsRoute path='/categories' component={ItemCategoriesTable} data = { this.state.itemcategories }/>
                                     <PropsRoute path='/npc' component={NpcPage} data = { this.state.monsters }/>
                                     <PropsRoute path='/quests' component={QuestsPage} data = { this.state.quests }/>
+                                    <PropsRoute path='/factioncheck' component={FactionCheckPage}
+                                        conversations={this.state.maps.conversations} quests={this.state.maps.quests} monsters={this.state.monsters}/>
                                     <PropsRoute path='/calculator' component={CalculatorPage}
                                         items={this.state.items} monsters={this.state.monsters} conditions={this.state.actorconditions}/>
                                     <PropsRoute path='/map' component={MapPage} data = { this.props.maps } globalMap = { this.props.globalMap }

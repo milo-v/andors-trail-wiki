@@ -14,6 +14,7 @@ export default class Main extends React.Component {
                     {LiLink("NPC", "/merchant")}
                     {LiLink("conditions")}
                     {LiLink("quests")}
+                    {LiLink("factioncheck")}
                     {LiLink("categories")}
                     {LiLink("calculator")}
                     {LiLink("map")}
