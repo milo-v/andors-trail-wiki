@@ -56,6 +56,15 @@ export default class OptimizerPanel extends Component {
         this.updateConfig({ locks: { ...this.props.config.locks, [slot]: itemId || undefined } });
     }
 
+    setSlotDisabled(slot, disabled) {
+        const patch = { disabledSlots: { ...this.props.config.disabledSlots, [slot]: disabled } };
+        if (disabled) {
+            patch.locks = { ...this.props.config.locks, [slot]: undefined };
+            patch.categoryFilters = { ...this.props.config.categoryFilters, [slot]: [] };
+        }
+        this.updateConfig(patch);
+    }
+
     addCategoryFilter(slot, categoryId) {
         const current = this.props.config.categoryFilters[slot] || [];
         if (!categoryId || current.includes(categoryId)) return;
@@ -201,7 +210,7 @@ export default class OptimizerPanel extends Component {
         try {
             this.worker.postMessage({
                 type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot,
-                limitedItemIds: config.limitedItemIds, horde, startFrom, randomSearchEnabled,
+                limitedItemIds: config.limitedItemIds, horde, startFrom, randomSearchEnabled, disabledSlots: config.disabledSlots,
             });
         } catch (err) {
             // Most likely a DataCloneError - some field on the monster/items/build
@@ -220,7 +229,7 @@ export default class OptimizerPanel extends Component {
     render() {
         const { items, monster, config } = this.props;
         const {
-            locks, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
+            locks, disabledSlots, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
             maxHpLossPerKill,
         } = config;
         const { running, error, evaluated, total, top10BestFirst, top10Random, randomEvaluated, startFrom, randomSearchEnabled, cardItem, cardPosition } = this.state;
@@ -247,13 +256,22 @@ export default class OptimizerPanel extends Component {
             <div style={{ marginTop: 20, borderTop: '1px solid #444', paddingTop: 10 }}>
                 <h3>Equipment optimizer</h3>
                 {EQUIP_SLOTS.map(slot => {
+                    const isDisableable = slot === 'weapon' || slot === 'shield';
+                    const disabled = isDisableable && !!disabledSlots[slot];
                     const selectedCategories = categoryFilters[slot] || [];
                     const categoryOptions = categoryOptionsBySlot[slot].filter(o => !selectedCategories.includes(o.value));
                     return (
                         <div key={slot} style={{ marginBottom: 6 }}>
                             <label style={{ display: 'inline-block', width: 140 }}>{SLOT_LABELS[slot]} lock</label>
-                            <SlotPicker slot={slot} items={items} value={locks[slot]} onChange={id => this.setLock(slot, id)} />
-                            {!locks[slot] && categoryOptions.length + selectedCategories.length > 0 && (
+                            {isDisableable && (
+                                <label style={{ marginRight: 10 }}>
+                                    <input type="checkbox" checked={disabled}
+                                        onChange={e => this.setSlotDisabled(slot, e.target.checked)} />
+                                    {' '}{slot === 'weapon' ? 'No weapon (barehanded)' : 'No shield'}
+                                </label>
+                            )}
+                            {!disabled && <SlotPicker slot={slot} items={items} value={locks[slot]} onChange={id => this.setLock(slot, id)} />}
+                            {!disabled && !locks[slot] && categoryOptions.length + selectedCategories.length > 0 && (
                                 <div style={{ margin: '2px 0 0 140px' }}>
                                     <SearchableSelect
                                         options={categoryOptions}

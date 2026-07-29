@@ -10,6 +10,7 @@ import { DEFAULT_CANDIDATES_PER_SLOT } from '../../utils/combat/optimizer';
 export function createEmptyOptimizerConfig() {
     return {
         locks: {},
+        disabledSlots: { weapon: false, shield: false },
         maxItemLevel: '',
         candidatesPerSlot: String(DEFAULT_CANDIDATES_PER_SLOT),
         unlimitedCandidates: false,
@@ -103,6 +104,13 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
             for (const slot of EQUIP_SLOTS) {
                 const itemId = srcOpt.locks[slot];
                 if (itemId && itemIds.has(itemId)) optimizerConfig.locks[slot] = itemId;
+            }
+        }
+        if (srcOpt.disabledSlots && typeof srcOpt.disabledSlots === 'object') {
+            for (const slot of ['weapon', 'shield']) {
+                if (typeof srcOpt.disabledSlots[slot] === 'boolean') {
+                    optimizerConfig.disabledSlots[slot] = srcOpt.disabledSlots[slot];
+                }
             }
         }
         if (typeof srcOpt.maxItemLevel === 'string') optimizerConfig.maxItemLevel = srcOpt.maxItemLevel;

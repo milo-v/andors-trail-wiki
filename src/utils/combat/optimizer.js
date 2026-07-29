@@ -103,11 +103,15 @@ export function selectCandidates(slot, items, options = {}) {
         : sorted.slice(0, candidatesPerSlot);
 }
 
-export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById, skillLevels, monster) {
+export function buildCandidateLists(items, locks, filtersBySlot = {}, candidatesPerSlot, conditionsById, skillLevels, monster, disabledSlots = {}) {
     const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
     const sharedConditionSlotCounts = computeSharedNegativeConditionSlotCounts(items, conditionsById);
     const result = {};
     for (const slot of EQUIP_SLOTS) {
+        if (disabledSlots[slot]) {
+            result[slot] = [];
+            continue;
+        }
         const lockedId = locks[slot];
         if (lockedId) {
             const lockedItem = itemsById[lockedId];

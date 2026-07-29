@@ -12,7 +12,7 @@ self.onmessage = async (event) => {
     if (type !== 'start') return;
 
     cancelled = false;
-    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot, limitedItemIds, horde, startFrom, randomSearchEnabled } = event.data;
+    const { build, monster, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot, limitedItemIds, horde, startFrom, randomSearchEnabled, disabledSlots } = event.data;
 
     // Without this, an exception anywhere in the search (bad monster/item data,
     // an unexpected shape) becomes an unhandled rejection inside the worker -
@@ -20,7 +20,7 @@ self.onmessage = async (event) => {
     // forever with no indication anything went wrong.
     try {
         const items = Object.values(itemsById);
-        const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot, conditionsById, build.skillLevels, monster);
+        const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot, conditionsById, build.skillLevels, monster, disabledSlots);
 
         const result = await searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, {
             maxHpLoss,
