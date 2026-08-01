@@ -475,8 +475,12 @@ function* bestFirstCombos(candidateLists, limitedItemIds, build) {
     }
 }
 
-export async function searchBestBuilds(build, monster, { itemsById, conditionsById }, candidateLists, options = {}) {
-    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, horde, startFrom = 0, randomSearchEnabled = false } = options;
+// targets: [{ monster, horde }] — each entry is one scoring target. When
+// multiple targets are given, hpLossPerKill in each result entry is the
+// arithmetic mean across all targets (Infinity if any target is unkillable).
+// damagePerTurn/difficultyLabel in results come from the first target.
+export async function searchBestBuilds(build, targets, { itemsById, conditionsById }, candidateLists, options = {}) {
+    const { maxHpLoss, limitedItemIds, onProgress, shouldCancel, yieldEveryN = 5000, startFrom = 0, randomSearchEnabled = false } = options;
     const total = countCombinations(candidateLists, limitedItemIds, build);
     let bestFirstTop10 = [];
     let randomTop10 = [];
@@ -484,7 +488,7 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
     // Equipment-independent across the whole search (only build.equipment
     // varies combo-to-combo) - computed once here instead of once per combo.
     // See combatMath.js's computeCombatSummary `precomputed` param.
-    const targetStats = resolveMonsterStats(monster, monster.activeConditions || [], conditionsById);
+    const precomputedTargetStats = targets.map(t => resolveMonsterStats(t.monster, t.monster.activeConditions || [], conditionsById));
     const baseStats = buildBaseStats(build.level, build.levelUpChoices, build.fortitudeLevels || []);
     // Only built when needed - buildDimensions runs the same weapon/shield
     // and ring pairing logic bestFirstCombos itself runs internally, so this
@@ -519,8 +523,21 @@ export async function searchBestBuilds(build, monster, { itemsById, conditionsBy
         const equipment = {};
         for (const slot of EQUIP_SLOTS) equipment[slot] = combo[slot] ? combo[slot].id : null;
         const candidateBuild = { ...build, equipment };
-        const summary = computeCombatSummary(candidateBuild, monster, { itemsById, conditionsById }, horde, { targetStats, baseStats });
-        if (maxHpLoss === undefined || maxHpLoss === null || summary.hpLossPerKill <= maxHpLoss) {
+        let sumHpLoss = 0;
+        let hasInfinite = false;
+        let primarySummary = null;
+        for (let ti = 0; ti < targets.length; ti++) {
+            const { monster: m, horde: h } = targets[ti];
+            const summary = computeCombatSummary(candidateBuild, m, { itemsById, conditionsById }, h, { targetStats: precomputedTargetStats[ti], baseStats });
+            if (ti === 0) primarySummary = summary;
+            if (!Number.isFinite(summary.hpLossPerKill)) hasInfinite = true;
+            else sumHpLoss += summary.hpLossPerKill;
+        }
+        const avgHpLossPerKill = targets.length === 1
+            ? primarySummary.hpLossPerKill
+            : (hasInfinite ? Infinity : sumHpLoss / targets.length);
+        const summary = targets.length === 1 ? primarySummary : { ...primarySummary, hpLossPerKill: avgHpLossPerKill };
+        if (maxHpLoss === undefined || maxHpLoss === null || avgHpLossPerKill <= maxHpLoss) {
             return insertIntoTop10(top10, { equipment, summary, buildNumber: comboIndex });
         }
         return top10;

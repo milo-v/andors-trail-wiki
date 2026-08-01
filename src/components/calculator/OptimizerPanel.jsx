@@ -107,7 +107,7 @@ export default class OptimizerPanel extends Component {
         this.setState({ cardItem: null });
     }
 
-    renderResultsTable(title, top10) {
+    renderResultsTable(title, top10, multiTarget) {
         if (top10.length === 0) return null;
         const { items, onApplyBuild } = this.props;
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
@@ -116,7 +116,7 @@ export default class OptimizerPanel extends Component {
                 <h4>{title}</h4>
                 <table style={{ width: '100%' }}>
                     <thead>
-                        <tr><th>#</th><th>Build #</th><th>Equipment</th><th>Damage/turn</th><th>HP loss/kill</th><th>Difficulty</th><th></th></tr>
+                        <tr><th>#</th><th>Build #</th><th>Equipment</th><th>Damage/turn</th><th>{multiTarget ? 'Avg HP loss/kill' : 'HP loss/kill'}</th><th>Difficulty</th><th></th></tr>
                     </thead>
                     <tbody>
                         {top10.map((entry, i) => (
@@ -151,18 +151,60 @@ export default class OptimizerPanel extends Component {
         );
     }
 
-    run() {
-        const { items, monster, build } = this.props;
+    addTarget(opponentId) {
+        if (!opponentId) return;
+        const targets = this.props.config.optimizerTargets || [];
+        this.updateConfig({ optimizerTargets: [...targets, { opponentId, hordeConfig: { enabled: false, size: 2 } }] });
+    }
+
+    addCurrentTarget() {
+        const { monster, hordeConfig } = this.props;
         if (!monster) return;
+        const targets = this.props.config.optimizerTargets || [];
+        this.updateConfig({ optimizerTargets: [...targets, { opponentId: monster.id, hordeConfig: { ...hordeConfig } }] });
+    }
+
+    removeTarget(index) {
+        const targets = this.props.config.optimizerTargets || [];
+        this.updateConfig({ optimizerTargets: targets.filter((_, i) => i !== index) });
+    }
+
+    updateTarget(index, patch) {
+        const targets = this.props.config.optimizerTargets || [];
+        this.updateConfig({
+            optimizerTargets: targets.map((t, i) => i === index ? { ...t, ...patch } : t),
+        });
+    }
+
+    run() {
+        const { items, monster, build, monsters } = this.props;
+        const config = this.props.config;
+        const configTargets = (config.optimizerTargets || []).filter(t => t.opponentId);
+        if (configTargets.length === 0 && !monster) return;
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: sanitizeItemForWorker(item) }), {});
-        const sanitizedMonster = sanitizeMonsterForWorker(monster);
         const conditionsById = {};
         Object.entries(this.props.conditionsById || {}).forEach(([id, condition]) => {
             conditionsById[id] = sanitizeConditionForWorker(condition);
         });
 
-        const config = this.props.config;
+        const monstersById = (monsters || []).reduce((obj, m) => Object.assign(obj, { [m.id]: m }), {});
+        let targets;
+        if (configTargets.length > 0) {
+            targets = configTargets.map(t => {
+                const m = monstersById[t.opponentId];
+                if (!m) return null;
+                const hc = t.hordeConfig;
+                const horde = hc && hc.enabled && Number(hc.size) > 1 ? { size: Number(hc.size) } : undefined;
+                return { monster: sanitizeMonsterForWorker(m), horde };
+            }).filter(Boolean);
+            if (targets.length === 0) return;
+        } else {
+            const hordeConfig = this.props.hordeConfig;
+            const horde = hordeConfig && hordeConfig.enabled && Number(hordeConfig.size) > 1 ? { size: Number(hordeConfig.size) } : undefined;
+            targets = [{ monster: sanitizeMonsterForWorker(monster), horde }];
+        }
+
         const locks = {};
         Object.entries(config.locks).forEach(([slot, itemId]) => { if (itemId) locks[slot] = itemId; });
 
@@ -180,8 +222,6 @@ export default class OptimizerPanel extends Component {
         const candidatesPerSlot = config.unlimitedCandidates
             ? null
             : Math.max(1, Number(config.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
-        const hordeConfig = this.props.hordeConfig;
-        const horde = hordeConfig && hordeConfig.enabled && Number(hordeConfig.size) > 1 ? { size: Number(hordeConfig.size) } : undefined;
         const startFrom = this.state.startFrom === '' ? 0 : Math.max(0, Number(this.state.startFrom) || 0);
         const { randomSearchEnabled } = this.state;
 
@@ -209,8 +249,8 @@ export default class OptimizerPanel extends Component {
         this.setState({ running: true, evaluated: 0, total: 0, top10BestFirst: [], top10Random: [], randomEvaluated: 0, error: null });
         try {
             this.worker.postMessage({
-                type: 'start', build, monster: sanitizedMonster, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot,
-                limitedItemIds: config.limitedItemIds, horde, startFrom, randomSearchEnabled, disabledSlots: config.disabledSlots,
+                type: 'start', build, targets, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot,
+                limitedItemIds: config.limitedItemIds, startFrom, randomSearchEnabled, disabledSlots: config.disabledSlots,
             });
         } catch (err) {
             // Most likely a DataCloneError - some field on the monster/items/build
@@ -227,13 +267,18 @@ export default class OptimizerPanel extends Component {
     }
 
     render() {
-        const { items, monster, config } = this.props;
+        const { items, monster, monsters, config, hordeConfig } = this.props;
         const {
             locks, disabledSlots, maxItemLevel, candidatesPerSlot, unlimitedCandidates, categoryFilters, excludedItemIds, limitedItemIds,
-            maxHpLossPerKill,
+            maxHpLossPerKill, optimizerTargets,
         } = config;
+        const targets = optimizerTargets || [];
         const { running, error, evaluated, total, top10BestFirst, top10Random, randomEvaluated, startFrom, randomSearchEnabled, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
+
+        const monstersById = (monsters || []).reduce((obj, m) => Object.assign(obj, { [m.id]: m }), {});
+        const monsterOptions = (monsters || []).map(m => ({ value: m.id, label: m.name }));
+        const monsterOptionsForAdd = monsterOptions.filter(o => !targets.some(t => t.opponentId === o.value));
 
         const itemsById = items.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {});
         const excludableOptions = items
@@ -361,7 +406,47 @@ export default class OptimizerPanel extends Component {
                         Splits evaluations 1:1 with a separate fully-random search (slower best-first progress, chance of a surprise find)
                     </span>
                 </div>
-                <button disabled={!monster || running} onClick={() => this.run()}>Run optimizer</button>
+                <div style={{ marginBottom: 10 }}>
+                    <strong>Targets</strong>
+                    <div style={{ color: '#999', fontSize: '0.85em', marginBottom: 6 }}>
+                        {targets.length === 0
+                            ? 'No targets added — using the current opponent as the sole target.'
+                            : `Optimizing for lowest average HP loss/kill across ${targets.length} target${targets.length === 1 ? '' : 's'}.`}
+                    </div>
+                    {targets.map((t, i) => {
+                        const m = monstersById[t.opponentId];
+                        const hc = t.hordeConfig || { enabled: false, size: 2 };
+                        return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <span style={{ minWidth: 120 }}>{m ? m.name : t.opponentId}</span>
+                                <label>
+                                    <input type="checkbox" checked={hc.enabled}
+                                        onChange={e => this.updateTarget(i, { hordeConfig: { ...hc, enabled: e.target.checked } })} />
+                                    {' '}Horde
+                                </label>
+                                {hc.enabled && (
+                                    <input type="number" min="2" step="1" value={hc.size} style={{ width: 50 }}
+                                        onChange={e => this.updateTarget(i, { hordeConfig: { ...hc, size: Math.max(2, Number(e.target.value) || 2) } })} />
+                                )}
+                                <button type="button" onClick={() => this.removeTarget(i)}>Remove</button>
+                            </div>
+                        );
+                    })}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                        {monster && (
+                            <button type="button" onClick={() => this.addCurrentTarget()}>
+                                + Add current opponent{hordeConfig?.enabled ? ` (×${hordeConfig.size})` : ''}
+                            </button>
+                        )}
+                        <SearchableSelect
+                            options={monsterOptionsForAdd}
+                            value={null}
+                            onChange={id => this.addTarget(id)}
+                            placeholder="Add any monster..."
+                        />
+                    </div>
+                </div>
+                <button disabled={(!monster && targets.length === 0) || running} onClick={() => this.run()}>Run optimizer</button>
                 {running && <button onClick={() => this.cancel()}>Cancel</button>}
                 {error && (
                     <div style={{ marginTop: 8, color: '#e05555' }}>Optimizer failed: {error}</div>
@@ -375,8 +460,8 @@ export default class OptimizerPanel extends Component {
                         {randomSearchEnabled && <span style={{ marginLeft: 12 }}>{randomEvaluated} random builds also checked</span>}
                     </div>
                 )}
-                {this.renderResultsTable('Best-first results', top10BestFirst)}
-                {this.renderResultsTable('Random-search results', top10Random)}
+                {this.renderResultsTable('Best-first results', top10BestFirst, targets.length > 1)}
+                {this.renderResultsTable('Random-search results', top10Random, targets.length > 1)}
                 {cardItem && (
                     <ItemStatsCard
                         item={cardItem}

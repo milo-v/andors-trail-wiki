@@ -129,6 +129,7 @@ export default class CalculatorPage extends Component {
                         />
                         <OptimizerPanel
                             items={this.props.items}
+                            monsters={this.props.monsters}
                             monster={monster}
                             build={build}
                             conditionsById={this.getConditionsById()}

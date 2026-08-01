@@ -18,6 +18,7 @@ export function createEmptyOptimizerConfig() {
         excludedItemIds: [],
         limitedItemIds: [],
         maxHpLossPerKill: '',
+        optimizerTargets: [],
     };
 }
 
@@ -129,6 +130,17 @@ export function decodeBuildFromQuery(search, items, monsters, conditions) {
             optimizerConfig.limitedItemIds = srcOpt.limitedItemIds.filter(id => itemIds.has(id));
         }
         if (typeof srcOpt.maxHpLossPerKill === 'string') optimizerConfig.maxHpLossPerKill = srcOpt.maxHpLossPerKill;
+        if (Array.isArray(srcOpt.optimizerTargets)) {
+            optimizerConfig.optimizerTargets = srcOpt.optimizerTargets
+                .filter(t => t && monsterIds.has(t.opponentId))
+                .map(t => ({
+                    opponentId: t.opponentId,
+                    hordeConfig: {
+                        enabled: typeof t.hordeConfig?.enabled === 'boolean' ? t.hordeConfig.enabled : false,
+                        size: Number.isInteger(t.hordeConfig?.size) && t.hordeConfig.size >= 2 ? t.hordeConfig.size : 2,
+                    },
+                }));
+        }
     }
 
     const hordeConfig = createEmptyHordeConfig();
