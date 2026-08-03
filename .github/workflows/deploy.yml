@@ -66,11 +66,20 @@ jobs:
           fi
           CURRENT_REF=$(cat .stable-ref 2>/dev/null || true)
           echo "4-months-ago target: $TARGET_REF / Current stable pin: $CURRENT_REF"
-          echo "ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
-          if [ "$TARGET_REF" != "$CURRENT_REF" ]; then
+          if [ -z "$CURRENT_REF" ]; then
+            echo "No pin recorded yet - advancing to natural target"
+            echo "ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
+          elif git -C ../game-repo-history merge-base --is-ancestor "$TARGET_REF" "$CURRENT_REF"; then
+            # Current pin already covers the natural lag target (e.g. a manual
+            # workflow_dispatch advanced it further) - don't snap it backward.
+            echo "Current pin is already at or ahead of the natural target - keeping it"
+            echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Natural target has moved past the current pin - advancing"
+            echo "ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
   build-deploy:
