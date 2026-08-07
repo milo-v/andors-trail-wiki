@@ -24,7 +24,8 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "gen": "bin\\generateMapImages.cmd"
+    "gen": "bin\\generateMapImages.cmd",
+    "build:wasm": "cd rust/optimizer-core && wasm-pack build --target web --out-dir ../../src/wasm/optimizer-core && rm -f ../../src/wasm/optimizer-core/.gitignore"
   },
   "eslintConfig": {
     "extends": [

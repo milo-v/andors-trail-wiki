@@ -287,17 +287,24 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
     // lives in procEffects.js) - applied once, unconditionally: the
     // player's identity persists across the whole horde fight, so there's
     // no reset-on-kill ramp-up issue here, ever.
+    // procRegenPerTurn accumulates the expected HP-per-round contribution
+    // (a DoT like Embergeist's fire, or a proc-inflicted heal) from every
+    // proc condition that lands on the player - see
+    // applyExpectedProcConditions' own doc comment for why this can't just
+    // come from mergeConditionInstances/getExpectedConditionHPPerRound
+    // below (those only see equip/active conditions, never proc ones).
+    let procRegenPerTurn = 0;
     for (const item of playerItems) {
-        applyExpectedProcConditions(adjustedPlayer, item.hitEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+        procRegenPerTurn += applyExpectedProcConditions(adjustedPlayer, item.hitEffect?.conditionsSource, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
         // Player's own gear reacting to being hit - scaled (every attacking
         // monster can independently trigger it).
-        applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
+        procRegenPerTurn += applyExpectedProcConditions(adjustedPlayer, item.hitReceivedEffect?.conditionsSource, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
     }
     // Conditions the monster's hit inflicts on the player - the highest-risk
     // horde effect (e.g. poison/stun stacking from N simultaneous attackers)
     // - scaled.
-    applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
-    applyExpectedProcConditions(adjustedPlayer, monster.hitReceivedEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
+    procRegenPerTurn += applyExpectedProcConditions(adjustedPlayer, monster.hitEffect?.conditionsTarget, baseHitChanceMonster, effectiveAttacksMonster, conditionsById);
+    procRegenPerTurn += applyExpectedProcConditions(adjustedPlayer, monster.hitReceivedEffect?.conditionsTarget, baseHitChancePlayer, baseAttacksPlayer, conditionsById);
 
     // Condition procs landing on the MONSTER: its identity resets every kill
     // in horde mode (a dead one is instantly replaced by a fresh,
@@ -365,7 +372,7 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
         const killAP = getExpectedKillEffectAP(playerItems) * killRate;
         if (killAP !== 0) adjustedPlayer.maxAP = Math.max(0, adjustedPlayer.maxAP + killAP);
         const killConditions = playerItems.flatMap(item => item.killEffect?.conditionsSource || []);
-        applyExpectedProcConditions(adjustedPlayer, killConditions, 100, killRate, conditionsById);
+        procRegenPerTurn += applyExpectedProcConditions(adjustedPlayer, killConditions, 100, killRate, conditionsById);
         turnsToKillMonster = getTurnsToKillTarget(adjustedPlayer, adjustedMonster);
     }
 
@@ -379,7 +386,7 @@ export function computeCombatSummary(build, monster, { itemsById, conditionsById
         [...getEquipmentConditions(equipped), ...(build.activeConditions || [])],
         conditionsById
     );
-    const regenPerTurn = getExpectedConditionHPPerRound(mergedConditions, conditionsById);
+    const regenPerTurn = getExpectedConditionHPPerRound(mergedConditions, conditionsById) + procRegenPerTurn;
     let hitEffectHPPerTurn = 0;
     for (const item of playerItems) {
         hitEffectHPPerTurn += getExpectedBoostPerTurn(item.hitEffect?.increaseCurrentHP, baseHitChancePlayer, baseAttacksPlayer);
