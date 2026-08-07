@@ -30,3 +30,8 @@ yarn-error.log*
 # superpowers skill working files (not committed)
 /docs/superpowers/
 /.superpowers/
+
+# Rust/WASM build artifacts
+/rust/optimizer-core/target/
+/rust/optimizer-core/pkg/
+/rust/optimizer-core/pkg-node/

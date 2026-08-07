@@ -1,0 +1,15 @@
+{
+  "name": "optimizer-core",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "optimizer_core_bg.wasm",
+    "optimizer_core.js",
+    "optimizer_core.d.ts"
+  ],
+  "main": "optimizer_core.js",
+  "types": "optimizer_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
