@@ -4,7 +4,7 @@
 // -> kill-triggered effects -> final HP/damage numbers) so a reviewer can
 // diff the two directly.
 
-use crate::model::{Build, Condition, ConditionEntry, Item, Monster};
+use crate::model::{Build, Condition, ConditionEntry, Horde, Item, Monster};
 use crate::proc_effects::{apply_expected_proc_conditions, average_range, get_expected_boost_per_turn};
 use crate::skill_data::{skill_constants as sc, skill_ids as si};
 use crate::stat_engine::{
@@ -238,10 +238,6 @@ pub struct CombatSummary {
     pub hp_gain_per_turn: f64,
     pub hp_loss_per_kill: f64,
     pub hp_gain_per_kill: f64,
-}
-
-pub struct Horde {
-    pub size: f64,
 }
 
 pub struct Precomputed<'a> {

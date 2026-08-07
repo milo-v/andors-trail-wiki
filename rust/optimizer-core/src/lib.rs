@@ -12,6 +12,7 @@ mod combat_math;
 mod level_model;
 mod model;
 mod proc_effects;
+mod search;
 mod skill_data;
 mod stat_engine;
 

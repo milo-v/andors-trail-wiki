@@ -209,15 +209,57 @@ pub struct Build {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Target {
-    // extended incrementally in Phase A3/A4 as search.rs/combat_math.rs
-    // need each field (monster id, horde config, ...).
+pub struct Horde {
+    pub size: f64,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct Target {
+    pub monster: Monster,
+    pub horde: Option<Horde>,
+}
+
+// Already combinedScore-sorted (best first) per slot — produced by the
+// existing JS valueScoring.js/selectCandidates, not reimplemented here (see
+// Phase A4's plan interfaces note: Rust only consumes the already-ranked
+// output).
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct CandidateLists {
-    // extended incrementally in Phase A4 as buildDimensions'/searchBestBuilds'
-    // Rust port needs each slot's candidate id list.
+    #[serde(default)]
+    pub weapon: Vec<Item>,
+    #[serde(default)]
+    pub shield: Vec<Item>,
+    #[serde(default)]
+    pub head: Vec<Item>,
+    #[serde(default)]
+    pub body: Vec<Item>,
+    #[serde(default)]
+    pub hand: Vec<Item>,
+    #[serde(default)]
+    pub feet: Vec<Item>,
+    #[serde(default)]
+    pub neck: Vec<Item>,
+    #[serde(default)]
+    pub leftring: Vec<Item>,
+    #[serde(default)]
+    pub rightring: Vec<Item>,
+}
+
+impl CandidateLists {
+    pub fn get(&self, slot: &str) -> &[Item] {
+        match slot {
+            "weapon" => &self.weapon,
+            "shield" => &self.shield,
+            "head" => &self.head,
+            "body" => &self.body,
+            "hand" => &self.hand,
+            "feet" => &self.feet,
+            "neck" => &self.neck,
+            "leftring" => &self.leftring,
+            "rightring" => &self.rightring,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
