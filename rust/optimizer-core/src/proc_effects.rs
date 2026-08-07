@@ -102,6 +102,14 @@ pub fn get_expected_condition_magnitude(
 }
 
 // procEffects.js:125-134 (applyExpectedProcConditions).
+// Returns the summed expected HP-per-round contribution from any applied
+// condition's round_effect.increase_current_hp (e.g. a proc-inflicted DoT
+// like Embergeist's fire) - callers applying to the player fold this into
+// hp_gain_per_turn/hp_gain_per_kill alongside
+// get_expected_condition_hp_per_round's equip/active-condition
+// contributions, since a proc condition's regen/DoT is otherwise silently
+// dropped (only its ability_effect stat delta, if any, was previously
+// modeled here). Mirrors procEffects.js's applyExpectedProcConditions.
 pub fn apply_expected_proc_conditions(
     stats: &mut PlayerStats,
     entries: &[ConditionEntry],
@@ -109,11 +117,12 @@ pub fn apply_expected_proc_conditions(
     attacks_per_turn: f64,
     conditions_by_id: &HashMap<String, Condition>,
     cycle_length: Option<f64>,
-) {
+) -> f64 {
+    let mut proc_regen_per_turn = 0.0;
     for entry in entries {
         let condition = conditions_by_id.get(&entry.condition);
         let condition = match condition {
-            Some(c) if c.ability_effect.is_some() => c,
+            Some(c) if c.ability_effect.is_some() || c.round_effect.as_ref().and_then(|re| re.increase_current_hp.as_ref()).is_some() => c,
             _ => continue,
         };
         let per_attempt_chance = (hit_chance_percent / 100.0) * (entry.chance / 100.0);
@@ -121,8 +130,14 @@ pub fn apply_expected_proc_conditions(
         if magnitude <= 0.0 {
             continue;
         }
-        apply_ability_effects(stats, condition.ability_effect.as_ref(), magnitude);
+        if condition.ability_effect.is_some() {
+            apply_ability_effects(stats, condition.ability_effect.as_ref(), magnitude);
+        }
+        if let Some(boost) = condition.round_effect.as_ref().and_then(|re| re.increase_current_hp.as_ref()) {
+            proc_regen_per_turn += ((boost.min + boost.max) / 2.0) * magnitude;
+        }
     }
+    proc_regen_per_turn
 }
 
 // procEffects.js:143-145 (getExpectedBoostPerTurn).
@@ -173,5 +188,29 @@ mod tests {
         let mut stats = PlayerStats::default();
         apply_expected_proc_conditions(&mut stats, &entries, 80.0, 2.0, &conditions_by_id, None);
         assert!((stats.damage_resistance - (-2.4)).abs() < 1e-9);
+    }
+
+    // Regression test: a proc-inflicted condition's roundEffect (e.g.
+    // Embergeist's "fire" - a -1 HP/round DoT triggered when the player
+    // hits it) must contribute to the returned expected-regen total, not
+    // just apply its abilityEffect stat delta. Found via a real user report
+    // that Embergeist's ailment wasn't reflected in hpGainPerTurn.
+    #[test]
+    fn apply_expected_proc_conditions_returns_round_effect_contribution() {
+        let mut conditions_by_id = HashMap::new();
+        conditions_by_id.insert(
+            "fire".to_string(),
+            Condition {
+                id: "fire".to_string(),
+                round_effect: Some(crate::model::RoundEffect { increase_current_hp: Some(Range { min: -1.0, max: -1.0 }) }),
+                is_stacking: false,
+                ability_effect: Some(crate::model::EquipEffect { increase_attack_chance: -15.0, ..Default::default() }),
+            },
+        );
+        let entries = vec![ConditionEntry { condition: "fire".to_string(), magnitude: Some(2.0), duration: 5.0, chance: 90.0 }];
+        let mut stats = PlayerStats::default();
+        let proc_regen = apply_expected_proc_conditions(&mut stats, &entries, 100.0, 3.0, &conditions_by_id, None);
+        assert!(proc_regen < 0.0, "expected negative (DoT) regen contribution, got {}", proc_regen);
+        assert!(stats.attack_chance < 0.0, "expected fire's abilityEffect to still apply");
     }
 }

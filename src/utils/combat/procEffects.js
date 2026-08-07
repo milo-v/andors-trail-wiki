@@ -122,15 +122,28 @@ export function getExpectedConditionMagnitude(condition, itemMagnitude, perAttem
 // (each { condition, magnitude, duration, chance }) onto `stats`, scaled by
 // its expected value given the triggering actor's hit chance and
 // attacks/turn. `chance` in the parsed JSON is a percent string (e.g. "20").
+// Returns the summed expected HP-per-round contribution from any applied
+// condition's roundEffect.increaseCurrentHP (e.g. a proc-inflicted DoT like
+// Embergeist's fire) - callers applying to the player fold this into
+// hpGainPerTurn/hpGainPerKill alongside getExpectedConditionHPPerRound's
+// equip/active-condition contributions, since a proc condition's regen/DoT
+// is otherwise silently dropped (only its abilityEffect stat delta, if any,
+// was previously modeled here).
 export function applyExpectedProcConditions(stats, entries, hitChancePercent, attacksPerTurn, conditionsById, cycleLength) {
+    let procRegenPerTurn = 0;
     for (const entry of entries || []) {
         const condition = conditionsById[entry.condition];
-        if (!condition?.abilityEffect) continue;
+        if (!condition?.abilityEffect && !condition?.roundEffect?.increaseCurrentHP) continue;
         const perAttemptChance = (hitChancePercent / 100) * (Number(entry.chance) / 100);
         const magnitude = getExpectedConditionMagnitude(condition, entry.magnitude, perAttemptChance, attacksPerTurn, entry.duration, cycleLength);
         if (magnitude <= 0) continue;
-        applyAbilityEffects(stats, condition.abilityEffect, magnitude);
+        if (condition.abilityEffect) applyAbilityEffects(stats, condition.abilityEffect, magnitude);
+        if (condition.roundEffect?.increaseCurrentHP) {
+            const { min = 0, max = 0 } = condition.roundEffect.increaseCurrentHP;
+            procRegenPerTurn += ((min + max) / 2) * magnitude;
+        }
     }
+    return procRegenPerTurn;
 }
 
 // Expected value of a direct stat boost (HP or AP) that fires on every

@@ -316,19 +316,26 @@ pub fn compute_combat_summary(
     };
 
     // --- Condition procs landing on the PLAYER ---
+    // proc_regen_per_turn accumulates the expected HP-per-round contribution
+    // (a DoT like Embergeist's fire, or a proc-inflicted heal) from every
+    // proc condition that lands on the player - see
+    // apply_expected_proc_conditions' own doc comment for why this can't
+    // just come from merge_condition_instances/get_expected_condition_hp_per_round
+    // below (those only see equip/active conditions, never proc ones).
+    let mut proc_regen_per_turn = 0.0;
     for item in &player_items {
         if let Some(entries) = item.hit_effect.as_ref().map(|e| &e.conditions_source) {
-            apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_player, base_attacks_player, conditions_by_id, None);
+            proc_regen_per_turn += apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_player, base_attacks_player, conditions_by_id, None);
         }
         if let Some(entries) = item.hit_received_effect.as_ref().map(|e| &e.conditions_source) {
-            apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_monster, effective_attacks_monster, conditions_by_id, None);
+            proc_regen_per_turn += apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_monster, effective_attacks_monster, conditions_by_id, None);
         }
     }
     if let Some(entries) = monster.hit_effect.as_ref().map(|e| &e.conditions_target) {
-        apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_monster, effective_attacks_monster, conditions_by_id, None);
+        proc_regen_per_turn += apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_monster, effective_attacks_monster, conditions_by_id, None);
     }
     if let Some(entries) = monster.hit_received_effect.as_ref().map(|e| &e.conditions_target) {
-        apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_player, base_attacks_player, conditions_by_id, None);
+        proc_regen_per_turn += apply_expected_proc_conditions(&mut adjusted_player, entries, base_hit_chance_player, base_attacks_player, conditions_by_id, None);
     }
 
     // --- Condition procs landing on the MONSTER (buildAdjustedMonster) ---
@@ -382,7 +389,7 @@ pub fn compute_combat_summary(
             .iter()
             .flat_map(|item| item.kill_effect.as_ref().map(|k| k.conditions_source.clone()).unwrap_or_default())
             .collect();
-        apply_expected_proc_conditions(&mut adjusted_player, &kill_conditions, 100.0, kill_rate, conditions_by_id, None);
+        proc_regen_per_turn += apply_expected_proc_conditions(&mut adjusted_player, &kill_conditions, 100.0, kill_rate, conditions_by_id, None);
         turns_to_kill_monster = get_turns_to_kill_target(&adjusted_player, &adjusted_monster);
     }
 
@@ -392,7 +399,7 @@ pub fn compute_combat_summary(
     let mut all_conditions = get_equipment_conditions(&equipped);
     all_conditions.extend(build.active_conditions.iter().cloned());
     let merged_conditions = merge_condition_instances(&all_conditions, conditions_by_id);
-    let regen_per_turn = get_expected_condition_hp_per_round(&merged_conditions, conditions_by_id);
+    let regen_per_turn = get_expected_condition_hp_per_round(&merged_conditions, conditions_by_id) + proc_regen_per_turn;
 
     let mut hit_effect_hp_per_turn = 0.0;
     for item in &player_items {
@@ -518,5 +525,83 @@ mod tests {
         assert_eq!(summary.hp_gain_per_turn, 0.0);
         assert!((summary.hp_loss_per_kill - 62.93197096185297).abs() < 1e-6);
         assert_eq!(summary.hp_gain_per_kill, 0.0);
+    }
+
+    // Golden value captured from the real combatMath.js for Embergeist: its
+    // hitReceivedEffect.conditionsTarget inflicts "fire" (abilityEffect:
+    // increaseAttackChance -15; roundEffect: -1 HP/round DoT) on the player
+    // whenever the PLAYER hits it. Regression test for a real bug report:
+    // hp_gain_per_turn/hp_gain_per_kill must be negative (the DoT), not the
+    // 0.0 they were before apply_expected_proc_conditions' roundEffect
+    // contribution was folded into regen_per_turn.
+    #[test]
+    fn compute_combat_summary_matches_js_golden_value_embergeist_proc_dot() {
+        let mut conditions_by_id = HashMap::new();
+        conditions_by_id.insert(
+            "fire".to_string(),
+            Condition {
+                id: "fire".to_string(),
+                round_effect: Some(crate::model::RoundEffect { increase_current_hp: Some(Range { min: -1.0, max: -1.0 }) }),
+                is_stacking: false,
+                ability_effect: Some(EquipEffect { increase_attack_chance: -15.0, ..Default::default() }),
+            },
+        );
+
+        let mut items_by_id = HashMap::new();
+        items_by_id.insert(
+            "sword1".to_string(),
+            Item {
+                id: "sword1".to_string(),
+                category: "weapon".to_string(),
+                equip_effect: EquipEffect {
+                    increase_attack_chance: 100.0,
+                    increase_attack_cost: 4.0,
+                    increase_attack_damage: Some(Range { min: 10.0, max: 15.0 }),
+                    ..Default::default()
+                },
+                damage_potential: None,
+                category_link: Some(CategoryLink { id: "lsword".to_string(), inventory_slot: "weapon".to_string(), size: "std".to_string() }),
+                hit_effect: None,
+                hit_received_effect: None,
+                kill_effect: None,
+            },
+        );
+
+        let build = Build {
+            level: 20,
+            level_up_choices: LevelUpChoices { health: 19.0, ..Default::default() },
+            fortitude_levels: vec![],
+            equipment: Equipment { weapon: Some("sword1".to_string()), ..Default::default() },
+            skill_levels: HashMap::new(),
+            active_conditions: vec![],
+        };
+
+        let monster = Monster {
+            id: "embergeist".to_string(),
+            attack_cost: 5.0,
+            attack_chance: 150.0,
+            critical_skill: 0.0,
+            critical_multiplier: 0.0,
+            attack_damage: Some(Range { min: 21.0, max: 22.0 }),
+            block_chance: 219.0,
+            damage_resistance: 9.0,
+            max_hp: 266.0,
+            max_ap: None,
+            is_immune_to_critical_hits: false,
+            hit_effect: None,
+            hit_received_effect: Some(ProcEffect {
+                conditions_target: vec![ConditionEntry { condition: "fire".to_string(), magnitude: Some(2.0), duration: 5.0, chance: 90.0 }],
+                ..Default::default()
+            }),
+            active_conditions: vec![],
+        };
+
+        let summary = compute_combat_summary(&build, &monster, &items_by_id, &conditions_by_id, None, None);
+        assert_eq!(summary.difficulty, 1.0);
+        assert!((summary.damage_per_turn - 0.81).abs() < 1e-6);
+        assert!((summary.hp_loss_per_turn - 36.98).abs() < 1e-6);
+        assert!((summary.hp_gain_per_turn - (-1.2948558529563408)).abs() < 1e-6, "expected negative DoT contribution, got {}", summary.hp_gain_per_turn);
+        assert!((summary.hp_loss_per_kill - 12166.419999999998).abs() < 1e-3);
+        assert!((summary.hp_gain_per_kill - (-426.0075756226361)).abs() < 1e-3);
     }
 }
