@@ -43,13 +43,24 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
     const shards = partitionWeaponShieldDim(candidateLists, limitedItemIds, build, shardCount);
 
     const workers = shards.map(() => new Worker(new URL('../../workers/optimizerWasmWorker.js', import.meta.url)));
-    const perShardCandidateLists = shards.map(weaponShieldSlice => ({
-        ...candidateLists,
-        // Rust side treats a restricted weapon/shield slice like any other
-        // candidate list — it doesn't need to know sharding happened.
-        weapon: weaponShieldSlice.map(pair => pair.weapon).filter(Boolean),
-        shield: weaponShieldSlice.map(pair => pair.shield).filter(Boolean),
-    }));
+    // Send each shard's exact slice of already-paired, already-pruned
+    // {weapon, shield} combos as explicit id pairs, rather than trying to
+    // hand Rust a restricted candidateLists.weapon/shield to re-pair itself.
+    // Flattening a pair slice into separate weapon/shield arrays is lossy -
+    // it can't reconstruct which shield went with which weapon - so Rust
+    // re-deriving pairs from those arrays either invented pairs that were
+    // never actually assigned to this shard (double-counted, since another
+    // shard could invent the same pair) or produced far more pairs than the
+    // shard's real share (see search::WeaponShieldPairIds's doc comment).
+    // Sending the pairs directly sidesteps that entirely: every other
+    // dimension (head/body/hand/feet/neck/rings) still comes from the full,
+    // unsharded candidateLists, since only the weapon-shield dimension is
+    // split across shards.
+    const perShardWeaponShieldPairs = shards.map(weaponShieldSlice =>
+        weaponShieldSlice.map(pair => ({
+            weapon: pair.weapon ? pair.weapon.id : null,
+            shield: pair.shield ? pair.shield.id : null,
+        })));
 
     // Per-shard running totals, updated as each worker's 'progress' messages
     // arrive - a shard's own total is fixed from the start of its run (Rust
@@ -85,9 +96,10 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
                 build,
                 targets: targets.map(t => ({ monster: t.monster, horde: t.horde || null })),
                 itemsById, conditionsById,
-                candidateLists: perShardCandidateLists[i],
+                candidateLists,
                 limitedItemIds: limitedItemIds ? [...limitedItemIds] : [],
                 maxHpLoss: maxHpLoss === undefined ? null : maxHpLoss,
+                weaponShieldPairs: perShardWeaponShieldPairs[i],
             }) });
         })));
 

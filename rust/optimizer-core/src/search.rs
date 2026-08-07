@@ -166,11 +166,17 @@ pub struct Dimension<'a> {
     pub values: Vec<Equipped<'a>>,
 }
 
-pub fn build_dimensions<'a>(candidate_lists: &'a CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>) -> Vec<Dimension<'a>> {
-    let max_achievable_ap = build.map(|b| compute_max_achievable_ap(b, candidate_lists));
-    let skill_levels: HashMap<String, f64> = build.map(|b| b.skill_levels.clone()).unwrap_or_default();
+pub fn build_dimensions<'a>(candidate_lists: &'a CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>, weapon_shield_override: Option<Vec<Equipped<'a>>>) -> Vec<Dimension<'a>> {
+    let weapon_shield_values = match weapon_shield_override {
+        Some(pairs) => pairs,
+        None => {
+            let max_achievable_ap = build.map(|b| compute_max_achievable_ap(b, candidate_lists));
+            let skill_levels: HashMap<String, f64> = build.map(|b| b.skill_levels.clone()).unwrap_or_default();
+            build_weapon_shield_pairs(&candidate_lists.weapon, &candidate_lists.shield, limited_item_ids, &skill_levels, max_achievable_ap)
+        }
+    };
 
-    let mut dims = vec![Dimension { values: build_weapon_shield_pairs(&candidate_lists.weapon, &candidate_lists.shield, limited_item_ids, &skill_levels, max_achievable_ap) }];
+    let mut dims = vec![Dimension { values: weapon_shield_values }];
     for slot in SINGLE_SLOTS.iter() {
         let list = candidate_lists.get(slot);
         if list.is_empty() {
@@ -194,8 +200,8 @@ pub fn build_dimensions<'a>(candidate_lists: &'a CandidateLists, limited_item_id
     dims
 }
 
-pub fn count_combinations(candidate_lists: &CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>) -> u64 {
-    build_dimensions(candidate_lists, limited_item_ids, build).iter().fold(1u64, |product, d| product * d.values.len() as u64)
+pub fn count_combinations<'a>(candidate_lists: &'a CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>, weapon_shield_override: Option<Vec<Equipped<'a>>>) -> u64 {
+    build_dimensions(candidate_lists, limited_item_ids, build, weapon_shield_override).iter().fold(1u64, |product, d| product * d.values.len() as u64)
 }
 
 fn merge_equipped<'a>(mut acc: Equipped<'a>, part: &Equipped<'a>) -> Equipped<'a> {
@@ -226,8 +232,8 @@ pub struct BestFirstCombos<'a> {
 }
 
 impl<'a> BestFirstCombos<'a> {
-    pub fn new(candidate_lists: &'a CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>) -> Self {
-        let dims = build_dimensions(candidate_lists, limited_item_ids, build);
+    pub fn new(candidate_lists: &'a CandidateLists, limited_item_ids: &HashSet<String>, build: Option<&Build>, weapon_shield_override: Option<Vec<Equipped<'a>>>) -> Self {
+        let dims = build_dimensions(candidate_lists, limited_item_ids, build, weapon_shield_override);
         let exhausted_empty_dim = dims.iter().any(|d| d.values.is_empty());
         let mut heap = BinaryHeap::new();
         let mut visited_by_rank: HashMap<i64, HashSet<Vec<usize>>> = HashMap::new();
@@ -297,13 +303,16 @@ pub struct SearchResult {
     pub total: u64,
 }
 
-// A search shard: restricts the outermost (weapon/shield) dimension to a
-// contiguous slice via shard_start_rank/shard_stride, mirroring how Phase
-// A5's coordinator partitions candidateLists.weapon/shield before handing
-// each worker its own ShardConfig — see wasmSearchCoordinator.js's
-// partitionWeaponShieldDim. shard_stride = 1 (the default) reproduces the
-// unsharded JS engine's behavior exactly, since the outermost dimension is
-// then left untouched.
+// A search shard: restricts the outermost (weapon/shield) dimension to
+// exactly the pairs the caller assigned to it, via weapon_shield_pairs —
+// see wasmSearchCoordinator.js's partitionWeaponShieldDim, which now hands
+// each shard its own already-correct, already-deduped slice of pairs
+// (built once from the unsharded candidate_lists) rather than a restricted
+// candidate_lists.weapon/shield that this side would have to re-pair itself
+// (that reconstruction was lossy at shard boundaries - see model.rs's
+// WeaponShieldPairIds doc comment). weapon_shield_pairs is None only for
+// the unsharded single-search-config path (tests, non-WASM callers), where
+// the weapon/shield dimension is derived from candidate_lists as normal.
 pub struct ShardConfig<'a> {
     pub build: &'a Build,
     pub targets: &'a [Target],
@@ -312,6 +321,7 @@ pub struct ShardConfig<'a> {
     pub candidate_lists: &'a CandidateLists,
     pub max_hp_loss: Option<f64>,
     pub limited_item_ids: HashSet<String>,
+    pub weapon_shield_pairs: Option<&'a [crate::model::WeaponShieldPairIds]>,
 }
 
 impl<'a> From<&'a SearchConfig> for ShardConfig<'a> {
@@ -324,6 +334,7 @@ impl<'a> From<&'a SearchConfig> for ShardConfig<'a> {
             candidate_lists: &config.candidate_lists,
             max_hp_loss: config.max_hp_loss,
             limited_item_ids: config.limited_item_ids.iter().cloned().collect(),
+            weapon_shield_pairs: config.weapon_shield_pairs.as_deref(),
         }
     }
 }
@@ -380,8 +391,20 @@ pub fn search_best_builds(config: &ShardConfig) -> SearchResult {
 // bound the actual callback rate by itself.
 const PROGRESS_REPORT_INTERVAL: u64 = 20000;
 
-pub fn search_best_builds_with_progress(config: &ShardConfig, mut on_progress: impl FnMut(u64, u64)) -> SearchResult {
-    let total = count_combinations(config.candidate_lists, &config.limited_item_ids, Some(config.build));
+pub fn search_best_builds_with_progress<'a>(config: &'a ShardConfig<'a>, mut on_progress: impl FnMut(u64, u64)) -> SearchResult {
+    // Resolve id-pairs to actual Item references once; both count_combinations
+    // and the BestFirstCombos iterator below need their own clone of this
+    // same resolved list, since it entirely replaces the weapon-shield
+    // dimension rather than being merged with candidate_lists.weapon/shield.
+    let weapon_shield_override: Option<Vec<Equipped<'a>>> = config.weapon_shield_pairs.map(|pairs| {
+        pairs.iter().map(|p| Equipped {
+            weapon: p.weapon.as_deref().and_then(|id| config.items_by_id.get(id)),
+            shield: p.shield.as_deref().and_then(|id| config.items_by_id.get(id)),
+            ..Default::default()
+        }).collect()
+    });
+
+    let total = count_combinations(config.candidate_lists, &config.limited_item_ids, Some(config.build), weapon_shield_override.clone());
     let mut best_first_top10: Vec<Top10Entry> = Vec::new();
 
     let precomputed_target_stats: Vec<PlayerStats> = config
@@ -394,7 +417,7 @@ pub fn search_best_builds_with_progress(config: &ShardConfig, mut on_progress: i
     let mut combo_index: u64 = 0;
     let mut evaluated: u64 = 0;
 
-    for combo in BestFirstCombos::new(config.candidate_lists, &config.limited_item_ids, Some(config.build)) {
+    for combo in BestFirstCombos::new(config.candidate_lists, &config.limited_item_ids, Some(config.build), weapon_shield_override) {
         combo_index += 1;
         evaluated += 1;
         if evaluated % PROGRESS_REPORT_INTERVAL == 0 {
@@ -506,7 +529,7 @@ mod tests {
         let candidate_lists = CandidateLists { weapon: weapons, neck: necks, ..Default::default() };
         let limited: HashSet<String> = HashSet::new();
         let mut ranks = Vec::new();
-        for combo in BestFirstCombos::new(&candidate_lists, &limited, None).take(4) {
+        for combo in BestFirstCombos::new(&candidate_lists, &limited, None, None).take(4) {
             let mut r = 0;
             if let Some(w) = combo.weapon { r += ["w1", "w2", "w3"].iter().position(|&id| id == w.id).unwrap(); }
             if let Some(n) = combo.neck { r += ["n1", "n2", "n3"].iter().position(|&id| id == n.id).unwrap(); }
@@ -572,7 +595,7 @@ mod tests {
         let conditions_by_id = HashMap::new();
         let limited_item_ids = HashSet::new();
 
-        let config = ShardConfig { build: &build, targets: &targets, items_by_id: &items_by_id, conditions_by_id: &conditions_by_id, candidate_lists: &candidate_lists, max_hp_loss: None, limited_item_ids };
+        let config = ShardConfig { build: &build, targets: &targets, items_by_id: &items_by_id, conditions_by_id: &conditions_by_id, candidate_lists: &candidate_lists, max_hp_loss: None, limited_item_ids, weapon_shield_pairs: None };
         let result = search_best_builds(&config);
 
         assert_eq!(result.total, 4);

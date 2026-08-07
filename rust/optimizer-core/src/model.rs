@@ -353,6 +353,22 @@ pub struct SearchConfig {
     pub max_hp_loss: Option<f64>,
     #[serde(rename = "limitedItemIds", default)]
     pub limited_item_ids: Vec<String>,
+    // When present, the caller (wasmSearchCoordinator.js) has already built
+    // the exact, deduped, correctly-pruned weapon/shield pair list for this
+    // shard - search_best_builds uses these pairs directly instead of
+    // re-deriving its own via candidate_lists.weapon/shield. Re-deriving
+    // from a per-shard candidate_lists.weapon/shield slice is what the
+    // sharding coordinator used to do; it's lossy (can't reconstruct which
+    // shield went with which weapon once flattened into separate arrays)
+    // and caused both under- and over-counting at shard boundaries.
+    #[serde(rename = "weaponShieldPairs", default)]
+    pub weapon_shield_pairs: Option<Vec<WeaponShieldPairIds>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WeaponShieldPairIds {
+    pub weapon: Option<String>,
+    pub shield: Option<String>,
 }
 
 #[cfg(test)]
