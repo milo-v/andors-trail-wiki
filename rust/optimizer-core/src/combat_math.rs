@@ -147,10 +147,10 @@ pub fn get_difficulty_label(difficulty: f64) -> &'static str {
 }
 
 // combatMath.js:134-145 (getExpectedConditionHPPerRound).
-fn get_expected_condition_hp_per_round(merged_conditions: &[(String, f64)], conditions_by_id: &HashMap<String, Condition>) -> f64 {
+fn get_expected_condition_hp_per_round(merged_conditions: &[(String, Option<f64>)], conditions_by_id: &HashMap<String, Condition>) -> f64 {
     let mut total = 0.0;
     for (condition_id, magnitude) in merged_conditions {
-        if *magnitude <= 0.0 {
+        if magnitude.map_or(false, |m| m <= 0.0) {
             continue;
         }
         let condition = match conditions_by_id.get(condition_id) {
@@ -162,7 +162,12 @@ fn get_expected_condition_hp_per_round(merged_conditions: &[(String, f64)], cond
             None => continue,
         };
         let avg = (boost.min + boost.max) / 2.0;
-        total += avg * magnitude;
+        // JS multiplies `avg * magnitude` directly here (no default-
+        // parameter substitution like applyActiveConditions has), so a
+        // missing magnitude produces NaN there. Using the same 1.0 fallback
+        // as apply_active_conditions instead of reproducing that NaN
+        // cascade - see ConditionEntry::magnitude's doc comment.
+        total += avg * magnitude.unwrap_or(1.0);
     }
     total
 }
@@ -197,7 +202,7 @@ fn apply_general_combat_skill_procs(
     if concussion_level > 0.0 && adjusted_player.attack_chance - adjusted_monster.block_chance > sc::CONCUSSION_THRESHOLD {
         let entries = vec![ConditionEntry {
             condition: "concussion".to_string(),
-            magnitude: sc::CONCUSSION_CONDITION_MAGNITUDE,
+            magnitude: Some(sc::CONCUSSION_CONDITION_MAGNITUDE),
             duration: sc::CONCUSSION_CONDITION_DURATION,
             chance: sc::CONCUSSION_CHANCE_PERCENT * concussion_level,
         }];
@@ -211,7 +216,7 @@ fn apply_general_combat_skill_procs(
         if crit1_level > 0.0 {
             let entries = vec![ConditionEntry {
                 condition: "crit1".to_string(),
-                magnitude: sc::CRIT_CONDITION_MAGNITUDE,
+                magnitude: Some(sc::CRIT_CONDITION_MAGNITUDE),
                 duration: sc::CRIT_CONDITION_DURATION,
                 chance: sc::CRIT1_CHANCE_PERCENT * crit1_level,
             }];
@@ -220,7 +225,7 @@ fn apply_general_combat_skill_procs(
         if crit2_level > 0.0 {
             let entries = vec![ConditionEntry {
                 condition: "crit2".to_string(),
-                magnitude: sc::CRIT_CONDITION_MAGNITUDE,
+                magnitude: Some(sc::CRIT_CONDITION_MAGNITUDE),
                 duration: sc::CRIT_CONDITION_DURATION,
                 chance: sc::CRIT2_CHANCE_PERCENT * crit2_level,
             }];
@@ -230,6 +235,7 @@ fn apply_general_combat_skill_procs(
 }
 
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize)]
 pub struct CombatSummary {
     pub difficulty: f64,
     pub difficulty_label: &'static str,
@@ -447,7 +453,7 @@ mod tests {
                 damage_potential: Some(Range { min: 3.0, max: 7.0 }),
                 category_link: Some(CategoryLink { id: "lsword".to_string(), inventory_slot: "weapon".to_string(), size: "std".to_string() }),
                 hit_effect: Some(ProcEffect {
-                    conditions_source: vec![ConditionEntry { condition: "bleed".to_string(), magnitude: 1.0, duration: 3.0, chance: 50.0 }],
+                    conditions_source: vec![ConditionEntry { condition: "bleed".to_string(), magnitude: Some(1.0), duration: 3.0, chance: 50.0 }],
                     ..Default::default()
                 }),
                 hit_received_effect: None,

@@ -7,6 +7,9 @@ import { getItemsForSlot } from './buildHelpers';
 import { EQUIP_SLOTS } from '../../utils/combat/statEngine';
 import { DEFAULT_CANDIDATES_PER_SLOT } from '../../utils/combat/optimizer';
 import { sanitizeItemForWorker, sanitizeMonsterForWorker, sanitizeConditionForWorker } from '../../utils/combat/workerSanitize';
+import { buildCandidateLists } from '../../utils/combat/optimizer';
+import { isWasmSupported } from '../../utils/combat/wasmSupport';
+import { runShardedSearch } from '../../utils/combat/wasmSearchCoordinator';
 
 const SLOT_LABELS = {
     weapon: 'Weapon', shield: 'Shield/Off-hand', head: 'Head', body: 'Body', hand: 'Hand',
@@ -33,8 +36,16 @@ export default class OptimizerPanel extends Component {
             startFrom: '',
             randomSearchEnabled: false,
             cardItem: null,
+            wasmSupported: false,
+            wasmEnabled: false,
         };
         this.worker = null;
+    }
+
+    componentDidMount() {
+        isWasmSupported().then(supported => {
+            if (supported) this.setState({ wasmSupported: true, wasmEnabled: true });
+        });
     }
 
     componentWillUnmount() {
@@ -223,7 +234,12 @@ export default class OptimizerPanel extends Component {
             ? null
             : Math.max(1, Number(config.candidatesPerSlot) || DEFAULT_CANDIDATES_PER_SLOT);
         const startFrom = this.state.startFrom === '' ? 0 : Math.max(0, Number(this.state.startFrom) || 0);
-        const { randomSearchEnabled } = this.state;
+        const { randomSearchEnabled, wasmEnabled, wasmSupported } = this.state;
+
+        if (wasmEnabled && wasmSupported) {
+            this.runWasm({ build, targets, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot, disabledSlots: config.disabledSlots, limitedItemIds: config.limitedItemIds });
+            return;
+        }
 
         this.terminateWorker();
         this.worker = new Worker(new URL('../../workers/optimizerWorker.js', import.meta.url));
@@ -261,6 +277,35 @@ export default class OptimizerPanel extends Component {
         }
     }
 
+    // WASM engine path: Track A only covers the deterministic best-first
+    // search (Rust/WASM worker-pool sharded), not the random-search stream
+    // (that's Track B, a separate WebGPU-based plan not yet implemented) -
+    // random search and the startFrom resume cursor are therefore not
+    // available while this engine is active (see the disabled random-search
+    // checkbox in render()). candidateLists building (valueScoring.js
+    // scoring/pruning) stays on the main thread here, same as it always ran
+    // inside optimizerWorker.js off-thread - it's cheap relative to the
+    // search itself, and the coordinator's own worker pool is where the
+    // expensive part (the search) actually runs.
+    async runWasm({ build, targets, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot, disabledSlots, limitedItemIds }) {
+        this.setState({ running: true, evaluated: 0, total: 0, top10BestFirst: [], top10Random: [], randomEvaluated: 0, error: null });
+        try {
+            const items = Object.values(itemsById);
+            const primaryMonster = targets.length > 0 ? targets[0].monster : null;
+            const candidateLists = buildCandidateLists(items, locks, filtersBySlot, candidatesPerSlot, conditionsById, build.skillLevels, primaryMonster, disabledSlots);
+
+            const result = await runShardedSearch(build, targets, { itemsById, conditionsById }, candidateLists, {
+                maxHpLoss,
+                limitedItemIds: limitedItemIds && limitedItemIds.length > 0 ? new Set(limitedItemIds) : null,
+                onProgress: ({ evaluated, total }) => this.setState({ evaluated, total }),
+            });
+
+            this.setState({ running: false, evaluated: result.evaluated, total: result.total, top10BestFirst: result.bestFirst, top10Random: [] });
+        } catch (err) {
+            this.setState({ running: false, error: (err && err.message) || 'Failed to run WASM optimizer' });
+        }
+    }
+
     cancel() {
         if (this.worker) this.worker.postMessage({ type: 'cancel' });
         this.setState({ running: false });
@@ -273,7 +318,7 @@ export default class OptimizerPanel extends Component {
             maxHpLossPerKill, optimizerTargets,
         } = config;
         const targets = optimizerTargets || [];
-        const { running, error, evaluated, total, top10BestFirst, top10Random, randomEvaluated, startFrom, randomSearchEnabled, cardItem, cardPosition } = this.state;
+        const { running, error, evaluated, total, top10BestFirst, top10Random, randomEvaluated, startFrom, randomSearchEnabled, wasmSupported, wasmEnabled, cardItem, cardPosition } = this.state;
         const percent = total > 0 ? Math.round((evaluated / total) * 100) : 0;
 
         const monstersById = (monsters || []).reduce((obj, m) => Object.assign(obj, { [m.id]: m }), {});
@@ -395,17 +440,30 @@ export default class OptimizerPanel extends Component {
                 </div>
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Start from build #</label>
-                    <input type="number" min="0" step="1" value={startFrom}
+                    <input type="number" min="0" step="1" value={startFrom} disabled={wasmEnabled}
                         onChange={e => this.setState({ startFrom: e.target.value })} placeholder="0" />
+                    {wasmEnabled && <span style={{ marginLeft: 6, color: '#999' }}>Not available with the WASM engine (each run always searches from the start)</span>}
                 </div>
                 <div style={{ marginBottom: 6 }}>
                     <label style={{ display: 'inline-block', width: 140 }}>Random search</label>
-                    <input type="checkbox" checked={randomSearchEnabled}
+                    <input type="checkbox" checked={randomSearchEnabled} disabled={wasmEnabled}
                         onChange={e => this.setState({ randomSearchEnabled: e.target.checked })} />
                     <span style={{ marginLeft: 6, color: '#999' }}>
-                        Splits evaluations 1:1 with a separate fully-random search (slower best-first progress, chance of a surprise find)
+                        {wasmEnabled
+                            ? 'Not available with the WASM engine yet (best-first search only)'
+                            : 'Splits evaluations 1:1 with a separate fully-random search (slower best-first progress, chance of a surprise find)'}
                     </span>
                 </div>
+                {wasmSupported && (
+                    <div style={{ marginBottom: 6 }}>
+                        <label style={{ display: 'inline-block', width: 140 }}>WASM engine</label>
+                        <input type="checkbox" checked={wasmEnabled}
+                            onChange={e => this.setState({ wasmEnabled: e.target.checked })} />
+                        <span style={{ marginLeft: 6, color: '#999' }}>
+                            Runs the best-first search as native code across all CPU cores (faster, same results)
+                        </span>
+                    </div>
+                )}
                 <div style={{ marginBottom: 10 }}>
                     <strong>Targets</strong>
                     <div style={{ color: '#999', fontSize: '0.85em', marginBottom: 6 }}>

@@ -19,7 +19,7 @@ use crate::stat_engine::{build_base_stats, apply_general_combat_skills, compute_
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Top10Entry {
     pub equipment: HashMap<&'static str, Option<String>>,
     pub summary: CombatSummary,
@@ -290,6 +290,7 @@ impl<'a> Iterator for BestFirstCombos<'a> {
     }
 }
 
+#[derive(serde::Serialize)]
 pub struct SearchResult {
     pub best_first: Vec<Top10Entry>,
     pub evaluated: u64,

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub const EQUIP_SLOTS: [&str; 9] = ["weapon", "shield", "head", "body", "hand", "feet", "neck", "leftring", "rightring"];
 pub const ARMOR_SLOTS: [&str; 4] = ["head", "body", "hand", "feet"];
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PlayerStats {
     pub attack_cost: f64,
     pub attack_chance: f64,
@@ -451,9 +451,9 @@ pub fn get_equipment_conditions(equipped: &Equipped) -> Vec<ConditionEntry> {
 }
 
 // statEngine.js:489-507 (mergeConditionInstances).
-pub fn merge_condition_instances(entries: &[ConditionEntry], conditions_by_id: &HashMap<String, Condition>) -> Vec<(String, f64)> {
+pub fn merge_condition_instances(entries: &[ConditionEntry], conditions_by_id: &HashMap<String, Condition>) -> Vec<(String, Option<f64>)> {
     let mut order: Vec<String> = Vec::new();
-    let mut merged: HashMap<String, f64> = HashMap::new();
+    let mut merged: HashMap<String, Option<f64>> = HashMap::new();
     for entry in entries {
         let condition = match conditions_by_id.get(&entry.condition) {
             Some(c) => c,
@@ -465,7 +465,23 @@ pub fn merge_condition_instances(entries: &[ConditionEntry], conditions_by_id: &
                 order.push(entry.condition.clone());
             }
             Some(&existing) => {
-                let new_val = if condition.is_stacking { existing + entry.magnitude } else { existing.max(entry.magnitude) };
+                // JS: `existing + magnitude` / `Math.max(existing, magnitude)` with
+                // either side `undefined` produces NaN, which then flows into
+                // applyActiveConditions' `magnitude <= 0` check (false, i.e. not
+                // skipped) and an effective multiplier of NaN - a real but
+                // vanishingly rare data-quality edge case (two instances of the
+                // same equipment-granted condition where at least one omits
+                // magnitude) that would corrupt the whole result either way.
+                // Rather than reproduce NaN propagation, treat a missing side as
+                // "no contribution from that instance" - closer in spirit to the
+                // apply_active_conditions single-instance default (see
+                // ConditionEntry::magnitude's doc comment) without the crash.
+                let new_val = match (existing, entry.magnitude) {
+                    (Some(a), Some(b)) => Some(if condition.is_stacking { a + b } else { a.max(b) }),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
                 merged.insert(entry.condition.clone(), new_val);
             }
         }
@@ -473,16 +489,21 @@ pub fn merge_condition_instances(entries: &[ConditionEntry], conditions_by_id: &
     order.into_iter().map(|id| { let v = merged[&id]; (id, v) }).collect()
 }
 
-// statEngine.js:515-524 (applyActiveConditions).
+// statEngine.js:515-524 (applyActiveConditions). A missing magnitude
+// (`None`) does NOT fail the `magnitude <= 0` skip check (JS: `undefined <=
+// 0` is false) and applies at full strength - JS's
+// `applyAbilityEffects(stats, effect, multiplier = 1)` substitutes 1 for an
+// explicitly-`undefined` argument. See ConditionEntry::magnitude's doc
+// comment for why this differs from the procEffects.js proc-condition path.
 pub fn apply_active_conditions(stats: &mut PlayerStats, active_conditions: &[ConditionEntry], conditions_by_id: &HashMap<String, Condition>) {
     let merged = merge_condition_instances(active_conditions, conditions_by_id);
     for (condition_id, magnitude) in merged {
-        if magnitude <= 0.0 {
+        if magnitude.map_or(false, |m| m <= 0.0) {
             continue;
         }
         if let Some(condition) = conditions_by_id.get(&condition_id) {
             if let Some(ability_effect) = &condition.ability_effect {
-                apply_ability_effects(stats, Some(ability_effect), magnitude);
+                apply_ability_effects(stats, Some(ability_effect), magnitude.unwrap_or(1.0));
             }
         }
     }
@@ -658,7 +679,7 @@ mod tests {
             hit_received_effect: None,
             active_conditions: vec![],
         };
-        let active = vec![ConditionEntry { condition: "poisoned".to_string(), magnitude: 2.0, ..Default::default() }];
+        let active = vec![ConditionEntry { condition: "poisoned".to_string(), magnitude: Some(2.0), ..Default::default() }];
         let stats = resolve_monster_stats(&monster, &active, &conditions_by_id);
 
         assert_eq!(stats.attack_cost, 4.0);
@@ -686,15 +707,36 @@ mod tests {
         conditions_by_id.insert(id2, c2);
 
         let entries = vec![
-            ConditionEntry { condition: "poisoned".to_string(), magnitude: 2.0, ..Default::default() },
-            ConditionEntry { condition: "poisoned".to_string(), magnitude: 3.0, ..Default::default() },
-            ConditionEntry { condition: "blessed".to_string(), magnitude: 1.0, ..Default::default() },
-            ConditionEntry { condition: "blessed".to_string(), magnitude: 5.0, ..Default::default() },
+            ConditionEntry { condition: "poisoned".to_string(), magnitude: Some(2.0), ..Default::default() },
+            ConditionEntry { condition: "poisoned".to_string(), magnitude: Some(3.0), ..Default::default() },
+            ConditionEntry { condition: "blessed".to_string(), magnitude: Some(1.0), ..Default::default() },
+            ConditionEntry { condition: "blessed".to_string(), magnitude: Some(5.0), ..Default::default() },
         ];
         let merged = merge_condition_instances(&entries, &conditions_by_id);
-        let as_map: HashMap<String, f64> = merged.into_iter().collect();
-        assert_eq!(as_map["poisoned"], 5.0);
-        assert_eq!(as_map["blessed"], 5.0);
+        let as_map: HashMap<String, Option<f64>> = merged.into_iter().collect();
+        assert_eq!(as_map["poisoned"], Some(5.0));
+        assert_eq!(as_map["blessed"], Some(5.0));
+    }
+
+    // Regression test: a missing magnitude on an equipment-granted condition
+    // (e.g. valugha_gloves' addedConditions entry for "clumsiness", which
+    // has no magnitude key at all in the real game data) must apply that
+    // condition's abilityEffect at full (1x) strength, matching JS's
+    // `applyAbilityEffects(stats, effect, multiplier = 1)` default
+    // parameter - NOT skip it, and NOT apply at 0x. Found via a real
+    // browser run: without this, attackChance/blockChance came out 7 higher
+    // than the live JS engine for a build wearing that item.
+    #[test]
+    fn apply_active_conditions_applies_missing_magnitude_at_full_strength() {
+        let mut conditions_by_id = HashMap::new();
+        let (id, c) = condition("clumsiness", false, Some(crate::model::EquipEffect { increase_attack_chance: -7.0, increase_block_chance: -7.0, ..Default::default() }));
+        conditions_by_id.insert(id, c);
+
+        let entries = vec![ConditionEntry { condition: "clumsiness".to_string(), magnitude: None, ..Default::default() }];
+        let mut stats = PlayerStats::default();
+        apply_active_conditions(&mut stats, &entries, &conditions_by_id);
+        assert_eq!(stats.attack_chance, -7.0);
+        assert_eq!(stats.block_chance, -7.0);
     }
 
     // Golden value from `resolveEquipped({ weapon: 'sword1' }, itemsById)` +
@@ -710,7 +752,7 @@ mod tests {
                 category: "weapon".to_string(),
                 equip_effect: crate::model::EquipEffect {
                     increase_attack_chance: 15.0,
-                    added_conditions: vec![ConditionEntry { condition: "blessed".to_string(), magnitude: 1.0, ..Default::default() }],
+                    added_conditions: vec![ConditionEntry { condition: "blessed".to_string(), magnitude: Some(1.0), ..Default::default() }],
                     ..Default::default()
                 },
                 damage_potential: Some(Range { min: 2.0, max: 8.0 }),
@@ -727,6 +769,6 @@ mod tests {
         let conditions = get_equipment_conditions(&equipped);
         assert_eq!(conditions.len(), 1);
         assert_eq!(conditions[0].condition, "blessed");
-        assert_eq!(conditions[0].magnitude, 1.0);
+        assert_eq!(conditions[0].magnitude, Some(1.0));
     }
 }

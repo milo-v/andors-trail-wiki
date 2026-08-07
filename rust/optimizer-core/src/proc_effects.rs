@@ -69,7 +69,7 @@ pub fn get_expected_stack_count_finite_horizon(per_attempt_chance: f64, attacks_
 // mirrors the JS's `cycleLength == null` (steady-state / 1v1 case).
 pub fn get_expected_condition_magnitude(
     condition: Option<&Condition>,
-    item_magnitude: f64,
+    item_magnitude: Option<f64>,
     per_attempt_chance: f64,
     attacks_per_turn: f64,
     duration: f64,
@@ -79,9 +79,14 @@ pub fn get_expected_condition_magnitude(
         Some(c) => c,
         None => return 0.0,
     };
-    if item_magnitude <= 0.0 {
-        return 0.0;
-    }
+    // JS: `if (!condition || !itemMagnitude || itemMagnitude <= 0) return 0;`
+    // - a missing magnitude (`undefined`) is falsy, so it's treated as "no
+    // effect" here, unlike statEngine.js's applyActiveConditions path (see
+    // ConditionEntry::magnitude's doc comment for why the two differ).
+    let item_magnitude = match item_magnitude {
+        Some(m) if m > 0.0 => m,
+        _ => return 0.0,
+    };
     if condition.is_stacking {
         let stacks = match cycle_length {
             Some(cl) => get_expected_stack_count_finite_horizon(per_attempt_chance, attacks_per_turn, duration, cl),
@@ -164,7 +169,7 @@ mod tests {
                 ability_effect: Some(crate::model::EquipEffect { increase_damage_resistance: -1.0, ..Default::default() }),
             },
         );
-        let entries = vec![ConditionEntry { condition: "poisoned".to_string(), magnitude: 1.0, duration: 3.0, chance: 50.0 }];
+        let entries = vec![ConditionEntry { condition: "poisoned".to_string(), magnitude: Some(1.0), duration: 3.0, chance: 50.0 }];
         let mut stats = PlayerStats::default();
         apply_expected_proc_conditions(&mut stats, &entries, 80.0, 2.0, &conditions_by_id, None);
         assert!((stats.damage_resistance - (-2.4)).abs() < 1e-9);
