@@ -365,6 +365,22 @@ fn equipment_from_combo<'a>(combo: &Equipped<'a>, build: &Build) -> Build {
 // candidate_lists.weapon/shield per shard before calling this, per
 // ShardConfig's doc comment above.
 pub fn search_best_builds(config: &ShardConfig) -> SearchResult {
+    search_best_builds_with_progress(config, |_, _| {})
+}
+
+// Same search, but invokes `on_progress(evaluated, total)` periodically so a
+// long-running caller (the WASM worker, mid-synchronous-call) can post
+// intermediate progress back to its host before the search completes -
+// without this, a caller has no way to distinguish "still working" from
+// "hung" for large candidate pools (see wasmSearchCoordinator.js).
+// Coarse floor on how often the JS/wasm boundary gets crossed at all - the
+// caller (optimizerWasmWorker.js) applies its own wall-clock throttle on
+// top of this, since combo evaluation speed varies too much (cheap
+// armor-only combos vs. weapon/proc-heavy ones) for a fixed combo count to
+// bound the actual callback rate by itself.
+const PROGRESS_REPORT_INTERVAL: u64 = 20000;
+
+pub fn search_best_builds_with_progress(config: &ShardConfig, mut on_progress: impl FnMut(u64, u64)) -> SearchResult {
     let total = count_combinations(config.candidate_lists, &config.limited_item_ids, Some(config.build));
     let mut best_first_top10: Vec<Top10Entry> = Vec::new();
 
@@ -381,6 +397,9 @@ pub fn search_best_builds(config: &ShardConfig) -> SearchResult {
     for combo in BestFirstCombos::new(config.candidate_lists, &config.limited_item_ids, Some(config.build)) {
         combo_index += 1;
         evaluated += 1;
+        if evaluated % PROGRESS_REPORT_INTERVAL == 0 {
+            on_progress(evaluated, total);
+        }
 
         let candidate_build = equipment_from_combo(&combo, config.build);
         let mut sum_hp_loss = 0.0;

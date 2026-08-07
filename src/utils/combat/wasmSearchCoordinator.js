@@ -38,7 +38,7 @@ function toCamelEntry(entry) {
 }
 
 export async function runShardedSearch(build, targets, { itemsById, conditionsById }, candidateLists, options = {}) {
-    const { limitedItemIds, maxHpLoss, onProgress } = options;
+    const { limitedItemIds, maxHpLoss, onProgress, signal } = options;
     const shardCount = Math.max(1, navigator.hardwareConcurrency || 4);
     const shards = partitionWeaponShieldDim(candidateLists, limitedItemIds, build, shardCount);
 
@@ -51,11 +51,34 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
         shield: weaponShieldSlice.map(pair => pair.shield).filter(Boolean),
     }));
 
+    // Per-shard running totals, updated as each worker's 'progress' messages
+    // arrive - a shard's own total is fixed from the start of its run (Rust
+    // computes it upfront), only its evaluated count grows, so summing
+    // across shards on every message gives an accurate aggregate without
+    // waiting for all shards to finish (see optimizerWasmWorker.js).
+    const shardProgress = shards.map(() => ({ evaluated: 0, total: 0 }));
+    const reportProgress = () => {
+        if (!onProgress) return;
+        const evaluated = shardProgress.reduce((sum, p) => sum + p.evaluated, 0);
+        const total = shardProgress.reduce((sum, p) => sum + p.total, 0);
+        onProgress({ evaluated, total });
+    };
+
+    const onAbort = () => workers.forEach(w => w.terminate());
+    if (signal) signal.addEventListener('abort', onAbort);
+
     try {
         const results = await Promise.all(workers.map((worker, i) => new Promise((resolve, reject) => {
+            if (signal && signal.aborted) {
+                reject(new DOMException('Optimizer search cancelled', 'AbortError'));
+                return;
+            }
             worker.onmessage = (event) => {
                 if (event.data.type === 'done') resolve(JSON.parse(event.data.resultJson));
-                else if (event.data.type === 'error') reject(new Error(event.data.message));
+                else if (event.data.type === 'progress') {
+                    shardProgress[i] = { evaluated: event.data.evaluated, total: event.data.total };
+                    reportProgress();
+                } else if (event.data.type === 'error') reject(new Error(event.data.message));
             };
             worker.onerror = (event) => reject(new Error(event.message || 'Optimizer WASM worker crashed'));
             worker.postMessage({ configJson: JSON.stringify({
@@ -78,6 +101,7 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
         if (onProgress) onProgress({ evaluated, total, top10: merged.slice(0, 10) });
         return { bestFirst: merged.slice(0, 10), evaluated, total };
     } finally {
+        if (signal) signal.removeEventListener('abort', onAbort);
         workers.forEach(w => w.terminate());
     }
 }

@@ -26,11 +26,18 @@ pub fn ping(n: u32) -> u32 {
 // event.data today, so wasmSearchCoordinator.js can send the same
 // build/targets/itemsById/conditionsById/candidateLists/limitedItemIds/
 // maxHpLoss shape it already assembles.
+// `on_progress` is called periodically as `(evaluated, total)` while the
+// search is still running (see search::PROGRESS_REPORT_INTERVAL) - this is
+// the only way a caller can observe progress mid-search, since this whole
+// function otherwise runs synchronously to completion before returning.
 #[wasm_bindgen]
-pub fn search_best_builds_js(config_json: &str) -> String {
+pub fn search_best_builds_js(config_json: &str, on_progress: &js_sys::Function) -> String {
     console_error_panic_hook::set_once();
     let config: model::SearchConfig = serde_json::from_str(config_json).expect("invalid search config JSON");
     let shard_config: search::ShardConfig = (&config).into();
-    let result = search::search_best_builds(&shard_config);
+    let this = JsValue::NULL;
+    let result = search::search_best_builds_with_progress(&shard_config, |evaluated, total| {
+        let _ = on_progress.call2(&this, &JsValue::from_f64(evaluated as f64), &JsValue::from_f64(total as f64));
+    });
     serde_json::to_string(&result).expect("failed to serialize search result")
 }

@@ -40,6 +40,7 @@ export default class OptimizerPanel extends Component {
             wasmEnabled: false,
         };
         this.worker = null;
+        this.wasmAbortController = null;
     }
 
     componentDidMount() {
@@ -50,6 +51,7 @@ export default class OptimizerPanel extends Component {
 
     componentWillUnmount() {
         this.terminateWorker();
+        if (this.wasmAbortController) this.wasmAbortController.abort();
     }
 
     terminateWorker() {
@@ -289,6 +291,7 @@ export default class OptimizerPanel extends Component {
     // expensive part (the search) actually runs.
     async runWasm({ build, targets, itemsById, conditionsById, locks, filtersBySlot, maxHpLoss, candidatesPerSlot, disabledSlots, limitedItemIds }) {
         this.setState({ running: true, evaluated: 0, total: 0, top10BestFirst: [], top10Random: [], randomEvaluated: 0, error: null });
+        this.wasmAbortController = new AbortController();
         try {
             const items = Object.values(itemsById);
             const primaryMonster = targets.length > 0 ? targets[0].monster : null;
@@ -298,16 +301,21 @@ export default class OptimizerPanel extends Component {
                 maxHpLoss,
                 limitedItemIds: limitedItemIds && limitedItemIds.length > 0 ? new Set(limitedItemIds) : null,
                 onProgress: ({ evaluated, total }) => this.setState({ evaluated, total }),
+                signal: this.wasmAbortController.signal,
             });
 
             this.setState({ running: false, evaluated: result.evaluated, total: result.total, top10BestFirst: result.bestFirst, top10Random: [] });
         } catch (err) {
+            if (err && err.name === 'AbortError') return;
             this.setState({ running: false, error: (err && err.message) || 'Failed to run WASM optimizer' });
+        } finally {
+            this.wasmAbortController = null;
         }
     }
 
     cancel() {
         if (this.worker) this.worker.postMessage({ type: 'cancel' });
+        if (this.wasmAbortController) this.wasmAbortController.abort();
         this.setState({ running: false });
     }
 
