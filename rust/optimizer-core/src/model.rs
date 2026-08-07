@@ -7,18 +7,67 @@ pub struct Range {
     pub max: f64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+// Shared shape for both equipEffect.addedConditions entries (condition +
+// magnitude only) and hitEffect/killEffect/hitReceivedEffect
+// conditionsSource/conditionsTarget entries (which also carry duration +
+// chance) — procEffects.js reads the same object shape in both contexts,
+// just ignores chance/duration where they don't apply.
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct ConditionEntry {
     pub condition: String,
     pub magnitude: f64,
+    #[serde(default)]
+    pub duration: f64,
+    #[serde(default)]
+    pub chance: f64,
 }
 
+// statEngine.js:19-35 (applyAbilityEffects) reads exactly these fields off
+// an equipEffect/abilityEffect object.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct EquipEffect {
+    #[serde(rename = "increaseMaxHP", default)]
+    pub increase_max_hp: f64,
     #[serde(rename = "increaseMaxAP", default)]
     pub increase_max_ap: f64,
+    #[serde(rename = "increaseMoveCost", default)]
+    pub increase_move_cost: f64,
+    #[serde(rename = "increaseAttackCost", default)]
+    pub increase_attack_cost: f64,
+    #[serde(rename = "increaseUseItemCost", default)]
+    pub increase_use_item_cost: f64,
+    #[serde(rename = "increaseReequipCost", default)]
+    pub increase_reequip_cost: f64,
+    #[serde(rename = "increaseAttackChance", default)]
+    pub increase_attack_chance: f64,
+    #[serde(rename = "increaseCriticalSkill", default)]
+    pub increase_critical_skill: f64,
+    #[serde(rename = "increaseAttackDamage")]
+    pub increase_attack_damage: Option<Range>,
+    #[serde(rename = "increaseBlockChance", default)]
+    pub increase_block_chance: f64,
+    #[serde(rename = "increaseDamageResistance", default)]
+    pub increase_damage_resistance: f64,
     #[serde(rename = "addedConditions", default)]
     pub added_conditions: Vec<ConditionEntry>,
+    #[serde(rename = "setCriticalMultiplier")]
+    pub set_critical_multiplier: Option<f64>,
+    #[serde(rename = "setNonWeaponDamageModifier")]
+    pub set_non_weapon_damage_modifier: Option<f64>,
+}
+
+// The subset of an item's linked ItemCategory (Main.jsx's linkTemp())
+// statEngine.js/skillData.js read: inventorySlot ("weapon"/"shield"/
+// "head"/"body"/"hand"/"feet"/...), size ("large" = two-handed weapon or
+// heavy armor; "light"/"std" = light armor), and category id (weapon
+// proficiency lookup).
+#[derive(Debug, Deserialize, Clone)]
+pub struct CategoryLink {
+    pub id: String,
+    #[serde(rename = "inventorySlot")]
+    pub inventory_slot: String,
+    #[serde(default)]
+    pub size: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -29,39 +78,95 @@ pub struct Item {
     pub equip_effect: EquipEffect,
     #[serde(rename = "damagePotential")]
     pub damage_potential: Option<Range>,
-    // ... remaining fields (hitEffect, hitReceivedEffect, killEffect,
-    // categoryLink) added in the same style as combatMath.js/statEngine.js
-    // read them — extend this struct incrementally as later phases need
+    #[serde(rename = "categoryLink")]
+    pub category_link: Option<CategoryLink>,
+    // ... remaining fields (hitEffect, hitReceivedEffect, killEffect) added
+    // in the same style as combatMath.js/procEffects.js read them, in
+    // Phase A2/A3 — extend this struct incrementally as later phases need
     // each field, rather than guessing the full shape up front.
 }
 
+// Monster.resetStatsToBaseTraits (Monster.java:50-66), as read by
+// statEngine.js:642-658 (resolveMonsterStats).
 #[derive(Debug, Deserialize, Clone)]
 pub struct Monster {
     pub id: String,
-    // extended incrementally in Phase A2 as statEngine.js's
-    // resolveMonsterStats needs each field.
+    #[serde(rename = "attackCost", default)]
+    pub attack_cost: f64,
+    #[serde(rename = "attackChance", default)]
+    pub attack_chance: f64,
+    #[serde(rename = "criticalSkill", default)]
+    pub critical_skill: f64,
+    #[serde(rename = "criticalMultiplier", default)]
+    pub critical_multiplier: f64,
+    #[serde(rename = "attackDamage")]
+    pub attack_damage: Option<Range>,
+    #[serde(rename = "blockChance", default)]
+    pub block_chance: f64,
+    #[serde(rename = "damageResistance", default)]
+    pub damage_resistance: f64,
+    #[serde(rename = "maxHP", default)]
+    pub max_hp: f64,
+    #[serde(rename = "maxAP")]
+    pub max_ap: Option<f64>,
+    #[serde(rename = "isImmuneToCriticalHits", default)]
+    pub is_immune_to_critical_hits: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Condition {
     pub id: String,
-    // extended incrementally in Phase A2/A3 as merge_condition_instances /
-    // get_expected_condition_hp_per_round need each field.
+    #[serde(rename = "isStacking", default)]
+    pub is_stacking: bool,
+    #[serde(rename = "abilityEffect")]
+    pub ability_effect: Option<EquipEffect>,
+    // extended in Phase A3 as get_expected_condition_hp_per_round needs
+    // roundEffect.increaseCurrentHP.
 }
 
+// statEngine.js's EQUIP_SLOTS: weapon/shield are the two hands, the rest
+// are armor + accessory slots. `build.equipment` maps slot -> item id;
+// resolve_equipped (Phase A2) turns this into slot -> Option<&Item>.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Equipment {
-    // extended incrementally in Phase A2 as resolve_equipped needs each
-    // slot field (weapon, shield, head, body, hand, feet, neck, rings...).
+    pub weapon: Option<String>,
+    pub shield: Option<String>,
+    pub head: Option<String>,
+    pub body: Option<String>,
+    pub hand: Option<String>,
+    pub feet: Option<String>,
+    pub neck: Option<String>,
+    pub leftring: Option<String>,
+    pub rightring: Option<String>,
+}
+
+// levelModel.js's applyLevelUpChoices reads these fields off
+// build.levelUpChoices; they must sum to `level - 1`.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct LevelUpChoices {
+    #[serde(default)]
+    pub health: f64,
+    #[serde(rename = "attackChance", default)]
+    pub attack_chance: f64,
+    #[serde(rename = "attackDamage", default)]
+    pub attack_damage: f64,
+    #[serde(rename = "blockChance", default)]
+    pub block_chance: f64,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Build {
     pub level: u32,
+    #[serde(rename = "levelUpChoices", default)]
+    pub level_up_choices: LevelUpChoices,
+    #[serde(rename = "fortitudeLevels", default)]
+    pub fortitude_levels: Vec<u32>,
     #[serde(default)]
     pub equipment: Equipment,
     #[serde(rename = "skillLevels", default)]
     pub skill_levels: HashMap<String, f64>,
+    #[serde(rename = "activeConditions", default)]
+    pub active_conditions: Vec<ConditionEntry>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -8,7 +8,11 @@
 
 use wasm_bindgen::prelude::*;
 
+mod level_model;
 mod model;
+mod proc_effects;
+mod skill_data;
+mod stat_engine;
 
 #[wasm_bindgen]
 pub fn ping(n: u32) -> u32 {
