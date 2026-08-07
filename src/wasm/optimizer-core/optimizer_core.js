@@ -1,4 +1,5 @@
 /* @ts-self-types="./optimizer_core.d.ts" */
+/* eslint-disable no-unused-vars, default-case -- wasm-bindgen generated file */
 
 /**
  * @param {number} n
