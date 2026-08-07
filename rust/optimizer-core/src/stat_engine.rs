@@ -627,7 +627,7 @@ mod tests {
     }
 
     fn condition(id: &str, is_stacking: bool, ability_effect: Option<crate::model::EquipEffect>) -> (String, Condition) {
-        (id.to_string(), Condition { id: id.to_string(), is_stacking, ability_effect })
+        (id.to_string(), Condition { id: id.to_string(), is_stacking, ability_effect, round_effect: None })
     }
 
     // Golden value captured from the real statEngine.js via
@@ -654,6 +654,9 @@ mod tests {
             max_hp: 20.0,
             max_ap: Some(12.0),
             is_immune_to_critical_hits: false,
+            hit_effect: None,
+            hit_received_effect: None,
+            active_conditions: vec![],
         };
         let active = vec![ConditionEntry { condition: "poisoned".to_string(), magnitude: 2.0, ..Default::default() }];
         let stats = resolve_monster_stats(&monster, &active, &conditions_by_id);
@@ -712,6 +715,9 @@ mod tests {
                 },
                 damage_potential: Some(Range { min: 2.0, max: 8.0 }),
                 category_link: Some(CategoryLink { id: "lsword".to_string(), inventory_slot: "weapon".to_string(), size: "std".to_string() }),
+                hit_effect: None,
+                hit_received_effect: None,
+                kill_effect: None,
             },
         );
         let equipment = Equipment { weapon: Some("sword1".to_string()), ..Default::default() };

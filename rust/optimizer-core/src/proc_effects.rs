@@ -159,6 +159,7 @@ mod tests {
             "poisoned".to_string(),
             Condition {
                 id: "poisoned".to_string(),
+                round_effect: None,
                 is_stacking: true,
                 ability_effect: Some(crate::model::EquipEffect { increase_damage_resistance: -1.0, ..Default::default() }),
             },

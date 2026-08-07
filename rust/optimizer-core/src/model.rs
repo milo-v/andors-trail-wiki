@@ -70,6 +70,29 @@ pub struct CategoryLink {
     pub size: String,
 }
 
+// Union of the fields combatMath.js reads off hitEffect/hitReceivedEffect/
+// killEffect. Not every field applies in every context (e.g. killEffect
+// never reads conditionsTarget/increaseAttackerCurrentAP/
+// increaseAttackerCurrentHP) — matching procEffects.js's/combatMath.js's own
+// approach of reading the same JSON object shape with `?.` regardless of
+// which fields a given effect slot actually populates, rather than three
+// separate Rust types for what's one shape in the game's JSON.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ProcEffect {
+    #[serde(rename = "increaseCurrentAP")]
+    pub increase_current_ap: Option<Range>,
+    #[serde(rename = "increaseCurrentHP")]
+    pub increase_current_hp: Option<Range>,
+    #[serde(rename = "increaseAttackerCurrentAP")]
+    pub increase_attacker_current_ap: Option<Range>,
+    #[serde(rename = "increaseAttackerCurrentHP")]
+    pub increase_attacker_current_hp: Option<Range>,
+    #[serde(rename = "conditionsSource", default)]
+    pub conditions_source: Vec<ConditionEntry>,
+    #[serde(rename = "conditionsTarget", default)]
+    pub conditions_target: Vec<ConditionEntry>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Item {
     pub id: String,
@@ -80,10 +103,12 @@ pub struct Item {
     pub damage_potential: Option<Range>,
     #[serde(rename = "categoryLink")]
     pub category_link: Option<CategoryLink>,
-    // ... remaining fields (hitEffect, hitReceivedEffect, killEffect) added
-    // in the same style as combatMath.js/procEffects.js read them, in
-    // Phase A2/A3 — extend this struct incrementally as later phases need
-    // each field, rather than guessing the full shape up front.
+    #[serde(rename = "hitEffect")]
+    pub hit_effect: Option<ProcEffect>,
+    #[serde(rename = "hitReceivedEffect")]
+    pub hit_received_effect: Option<ProcEffect>,
+    #[serde(rename = "killEffect")]
+    pub kill_effect: Option<ProcEffect>,
 }
 
 // Monster.resetStatsToBaseTraits (Monster.java:50-66), as read by
@@ -111,11 +136,25 @@ pub struct Monster {
     pub max_ap: Option<f64>,
     #[serde(rename = "isImmuneToCriticalHits", default)]
     pub is_immune_to_critical_hits: bool,
+    #[serde(rename = "hitEffect")]
+    pub hit_effect: Option<ProcEffect>,
+    #[serde(rename = "hitReceivedEffect")]
+    pub hit_received_effect: Option<ProcEffect>,
+    #[serde(rename = "activeConditions", default)]
+    pub active_conditions: Vec<ConditionEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RoundEffect {
+    #[serde(rename = "increaseCurrentHP")]
+    pub increase_current_hp: Option<Range>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Condition {
     pub id: String,
+    #[serde(rename = "roundEffect")]
+    pub round_effect: Option<RoundEffect>,
     #[serde(rename = "isStacking", default)]
     pub is_stacking: bool,
     #[serde(rename = "abilityEffect")]
