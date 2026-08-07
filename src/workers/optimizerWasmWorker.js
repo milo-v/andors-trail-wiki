@@ -16,11 +16,11 @@ self.onmessage = async (event) => {
     const { configJson } = event.data;
     try {
         let lastPostTime = 0;
-        const resultJson = search_best_builds_js(configJson, (evaluated, total) => {
+        const resultJson = search_best_builds_js(configJson, (evaluated, total, top10Json) => {
             const now = Date.now();
             if (now - lastPostTime < MIN_PROGRESS_POST_INTERVAL_MS) return;
             lastPostTime = now;
-            self.postMessage({ type: 'progress', evaluated, total });
+            self.postMessage({ type: 'progress', evaluated, total, top10: JSON.parse(top10Json) });
         });
         self.postMessage({ type: 'done', resultJson });
     } catch (err) {

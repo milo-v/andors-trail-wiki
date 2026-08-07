@@ -376,12 +376,13 @@ fn equipment_from_combo<'a>(combo: &Equipped<'a>, build: &Build) -> Build {
 // candidate_lists.weapon/shield per shard before calling this, per
 // ShardConfig's doc comment above.
 pub fn search_best_builds(config: &ShardConfig) -> SearchResult {
-    search_best_builds_with_progress(config, |_, _| {})
+    search_best_builds_with_progress(config, |_, _, _| {})
 }
 
-// Same search, but invokes `on_progress(evaluated, total)` periodically so a
-// long-running caller (the WASM worker, mid-synchronous-call) can post
-// intermediate progress back to its host before the search completes -
+// Same search, but invokes `on_progress(evaluated, total, top10_so_far)`
+// periodically so a long-running caller (the WASM worker, mid-synchronous-call)
+// can post intermediate progress - including the current best-first ranking,
+// not just counts - back to its host before the search completes -
 // without this, a caller has no way to distinguish "still working" from
 // "hung" for large candidate pools (see wasmSearchCoordinator.js).
 // Coarse floor on how often the JS/wasm boundary gets crossed at all - the
@@ -391,7 +392,7 @@ pub fn search_best_builds(config: &ShardConfig) -> SearchResult {
 // bound the actual callback rate by itself.
 const PROGRESS_REPORT_INTERVAL: u64 = 20000;
 
-pub fn search_best_builds_with_progress<'a>(config: &'a ShardConfig<'a>, mut on_progress: impl FnMut(u64, u64)) -> SearchResult {
+pub fn search_best_builds_with_progress<'a>(config: &'a ShardConfig<'a>, mut on_progress: impl FnMut(u64, u64, &[Top10Entry])) -> SearchResult {
     // Resolve id-pairs to actual Item references once; both count_combinations
     // and the BestFirstCombos iterator below need their own clone of this
     // same resolved list, since it entirely replaces the weapon-shield
@@ -421,7 +422,7 @@ pub fn search_best_builds_with_progress<'a>(config: &'a ShardConfig<'a>, mut on_
         combo_index += 1;
         evaluated += 1;
         if evaluated % PROGRESS_REPORT_INTERVAL == 0 {
-            on_progress(evaluated, total);
+            on_progress(evaluated, total, &best_first_top10);
         }
 
         let candidate_build = equipment_from_combo(&combo, config.build);
@@ -613,5 +614,74 @@ mod tests {
             assert!((entry.summary.hp_loss_per_kill - hp_loss).abs() < 1e-6);
             assert!((entry.summary.damage_per_turn - dpt).abs() < 1e-6);
         }
+    }
+
+    // Live top10 snapshots (Phase A6): on_progress must be handed the
+    // search's *actual* running top10, not just counts, and that ranking can
+    // only get better (or stay the same) as more combos are evaluated -
+    // never worse - since insert_into_top10 only ever keeps the best 10 seen
+    // so far. Uses enough weapons to cross PROGRESS_REPORT_INTERVAL at least
+    // twice so on_progress fires more than once.
+    #[test]
+    fn on_progress_receives_non_worsening_top10_snapshots() {
+        let weapon_count = (PROGRESS_REPORT_INTERVAL * 2 + 5) as usize;
+        let weapons: Vec<Item> = (0..weapon_count)
+            .map(|i| {
+                let mut w = item(&format!("w{i}"), "weapon", "std", 1.0 + i as f64 * 0.001, 2.0 + i as f64 * 0.001);
+                w.equip_effect = crate::model::EquipEffect { increase_attack_chance: 10.0, increase_attack_cost: 4.0, ..Default::default() };
+                w
+            })
+            .collect();
+        let mut items_by_id = HashMap::new();
+        for it in &weapons {
+            items_by_id.insert(it.id.clone(), it.clone());
+        }
+        let candidate_lists = CandidateLists { weapon: weapons, ..Default::default() };
+
+        let build = Build {
+            level: 5,
+            level_up_choices: crate::model::LevelUpChoices { health: 4.0, ..Default::default() },
+            fortitude_levels: vec![],
+            equipment: crate::model::Equipment::default(),
+            skill_levels: HashMap::new(),
+            active_conditions: vec![],
+        };
+        let monster = Monster {
+            id: "rat1".to_string(),
+            attack_cost: 4.0,
+            attack_chance: 30.0,
+            critical_skill: 0.0,
+            critical_multiplier: 0.0,
+            attack_damage: Some(crate::model::Range { min: 1.0, max: 3.0 }),
+            block_chance: 5.0,
+            damage_resistance: 0.0,
+            max_hp: 15.0,
+            max_ap: Some(10.0),
+            is_immune_to_critical_hits: false,
+            hit_effect: None,
+            hit_received_effect: None,
+            active_conditions: vec![],
+        };
+        let targets = vec![Target { monster, horde: None }];
+        let conditions_by_id = HashMap::new();
+        let limited_item_ids = HashSet::new();
+        let config = ShardConfig { build: &build, targets: &targets, items_by_id: &items_by_id, conditions_by_id: &conditions_by_id, candidate_lists: &candidate_lists, max_hp_loss: None, limited_item_ids, weapon_shield_pairs: None };
+
+        let mut snapshots: Vec<(u64, Option<f64>)> = Vec::new();
+        let result = search_best_builds_with_progress(&config, |evaluated, total, top10_so_far| {
+            assert!(total >= weapon_count as u64);
+            assert!(top10_so_far.len() <= 10);
+            snapshots.push((evaluated, top10_so_far.first().map(|e| e.summary.hp_loss_per_kill)));
+        });
+
+        assert!(snapshots.len() >= 2, "expected on_progress to fire more than once, got {}", snapshots.len());
+        for w in snapshots.windows(2) {
+            if let (Some(prev_best), Some(next_best)) = (w[0].1, w[1].1) {
+                assert!(next_best <= prev_best, "top10 got worse between progress calls: {:?} -> {:?}", w[0], w[1]);
+            }
+        }
+        // Final snapshot's best entry must match the completed search's actual best.
+        let last_best = snapshots.last().unwrap().1;
+        assert_eq!(last_best, result.best_first.first().map(|e| e.summary.hp_loss_per_kill));
     }
 }

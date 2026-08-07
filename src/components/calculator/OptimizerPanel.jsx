@@ -300,7 +300,7 @@ export default class OptimizerPanel extends Component {
             const result = await runShardedSearch(build, targets, { itemsById, conditionsById }, candidateLists, {
                 maxHpLoss,
                 limitedItemIds: limitedItemIds && limitedItemIds.length > 0 ? new Set(limitedItemIds) : null,
-                onProgress: ({ evaluated, total }) => this.setState({ evaluated, total }),
+                onProgress: ({ evaluated, total, top10 }) => this.setState(top10 ? { evaluated, total, top10BestFirst: top10 } : { evaluated, total }),
                 signal: this.wasmAbortController.signal,
             });
 

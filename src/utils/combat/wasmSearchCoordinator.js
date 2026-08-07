@@ -66,13 +66,22 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
     // arrive - a shard's own total is fixed from the start of its run (Rust
     // computes it upfront), only its evaluated count grows, so summing
     // across shards on every message gives an accurate aggregate without
-    // waiting for all shards to finish (see optimizerWasmWorker.js).
-    const shardProgress = shards.map(() => ({ evaluated: 0, total: 0 }));
+    // waiting for all shards to finish (see optimizerWasmWorker.js). Each
+    // shard's own top10-so-far is merged the same way the final result is
+    // (below), giving a live, real ranking rather than a per-shard partial
+    // view - a shard that hasn't reported yet simply contributes nothing
+    // until its first progress message, same as its evaluated/total do.
+    const shardProgress = shards.map(() => ({ evaluated: 0, total: 0, top10: [] }));
     const reportProgress = () => {
         if (!onProgress) return;
         const evaluated = shardProgress.reduce((sum, p) => sum + p.evaluated, 0);
         const total = shardProgress.reduce((sum, p) => sum + p.total, 0);
-        onProgress({ evaluated, total });
+        const merged = shardProgress.flatMap(p => p.top10.map(toCamelEntry));
+        merged.sort((a, b) => {
+            if (a.summary.hpLossPerKill !== b.summary.hpLossPerKill) return a.summary.hpLossPerKill - b.summary.hpLossPerKill;
+            return b.summary.damagePerTurn - a.summary.damagePerTurn;
+        });
+        onProgress({ evaluated, total, top10: merged.slice(0, 10) });
     };
 
     const onAbort = () => workers.forEach(w => w.terminate());
@@ -87,7 +96,7 @@ export async function runShardedSearch(build, targets, { itemsById, conditionsBy
             worker.onmessage = (event) => {
                 if (event.data.type === 'done') resolve(JSON.parse(event.data.resultJson));
                 else if (event.data.type === 'progress') {
-                    shardProgress[i] = { evaluated: event.data.evaluated, total: event.data.total };
+                    shardProgress[i] = { evaluated: event.data.evaluated, total: event.data.total, top10: event.data.top10 || [] };
                     reportProgress();
                 } else if (event.data.type === 'error') reject(new Error(event.data.message));
             };
