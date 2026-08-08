@@ -12,8 +12,8 @@ export const NO_ITEM = 0xffffffff;
 
 export const ITEM_FLOAT_STRIDE = 101;
 export const ITEM_U32_STRIDE = 28;
-export const BUILD_MONSTER_FLOAT_STRIDE = 80;
-export const BUILD_MONSTER_U32_STRIDE = 16;
+export const BUILD_MONSTER_FLOAT_STRIDE = 93;
+export const BUILD_MONSTER_U32_STRIDE = 20;
 export const CONDITION_STRIDE = 13;
 export const COMBO_STRIDE = 9;
 
@@ -217,6 +217,27 @@ export function packBuildAndMonsterBuffer(playerBaseStats, monster, monsterStats
     floatBuffer[77] = lvl(SKILL_IDS.CRIT1);
     floatBuffer[78] = lvl(SKILL_IDS.CRIT2);
     floatBuffer[79] = lvl(SKILL_IDS.EATER);
+    floatBuffer[80] = lvl(SKILL_IDS.CLEAVE);
+
+    const activeConditions = build.activeConditions || [];
+    for (let s = 0; s < PROC_SLOT_COUNT; s++) {
+        const fOff = 81 + s * 3;
+        const uOff = 16 + s;
+        const entry = activeConditions[s];
+        if (!entry) {
+            u32Buffer[uOff] = NO_CONDITION;
+            continue;
+        }
+        const idx = conditionIndexById[entry.conditionId];
+        if (idx === undefined) {
+            u32Buffer[uOff] = NO_CONDITION;
+            continue;
+        }
+        u32Buffer[uOff] = idx;
+        floatBuffer[fOff] = entry.magnitude || 0;
+        floatBuffer[fOff + 1] = 100;
+        floatBuffer[fOff + 2] = 0;
+    }
 
     return { buildAndMonsterBuffer: floatBuffer, buildAndMonsterU32Buffer: u32Buffer };
 }

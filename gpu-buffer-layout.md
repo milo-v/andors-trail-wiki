@@ -186,14 +186,17 @@ horde config. One record for the whole search (not per-combo).
 | 77 | `crit1Level` |
 | 78 | `crit2Level` |
 | 79 | `eaterLevel` |
+| 80 | `mergeCleaveLevel` (skill level for Cleave's flat AP-per-kill, if modeled — see Phase B2 kill-effects step) |
+| 81-92 | `build.activeConditions` as a 4-slot field, same `[magnitude, chance, duration]` layout as an item's proc fields (chance packed as 100, duration as 0 — these are toggled/permanent states, not on-hit rolls, same convention as `equipEffect.addedConditions`). Merges with combo-dependent equip-added conditions via the same stacking-aware `mergeConditionInstances` rule at evaluation time — this field cannot be pre-folded into the player baseline the way general combat skills can, because merging depends on which conditions the combo's equipment happens to also grant. |
 
-**`BUILD_MONSTER_FLOAT_STRIDE = 80`**.
+**`BUILD_MONSTER_FLOAT_STRIDE = 93`**.
 
 Companion u32 buffer (`buildAndMonsterU32`): monster proc condition indices,
 4 per field at the same relative slot layout as an item's u32 proc fields,
 base offsets `0, 4, 8, 12` for `hitEffect.conditionsSource/Target`,
-`hitReceivedEffect.conditionsSource/Target` respectively.
-**`BUILD_MONSTER_U32_STRIDE = 16`**.
+`hitReceivedEffect.conditionsSource/Target` respectively, then
+`build.activeConditions`' 4 condition indices at base offset `16`.
+**`BUILD_MONSTER_U32_STRIDE = 20`**.
 
 ## Condition table (`conditionTable` buffer, f32)
 
