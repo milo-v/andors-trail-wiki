@@ -11,6 +11,9 @@ import './Main.css';
 import { getCachedData, setCachedData, CACHE_SCHEMA_VERSION } from '../utils/dataCache';
 import WayfinderPage from './wayfinder/WayfinderPage';
 import { DATA_BASE, DISPLAY_VERSION, IS_DEV } from '../utils/dataBase';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+
+const FETCH_TIMEOUT_MS = 15000;
 
 const ItemsPage = React.lazy(() => import('./items/ItemsPage.jsx'));
 const ConditionsPage = React.lazy(() => import('./conditions/ConditionsPage'));
@@ -27,12 +30,24 @@ const MAIN_CACHE_KEY = `main-v${CACHE_SCHEMA_VERSION}-${DATA_BASE || 'stable'}-$
 function Loading (props) {
     let mp = props.maxProgress;
     let p = props.progress;
-    let percentage = (mp - p) / mp * 100;
+    let percentage = mp ? (mp - p) / mp * 100 : 0;
+
+    if (props.error) {
+        return (
+            <div className='loading-base'>
+                <div className='loading-container'>
+                    <h3>Loading failed. {IS_DEV ? String(props.error?.message || props.error) : 'Please check your connection.'}</h3>
+                    {props.onRetry && <button onClick={props.onRetry}>Retry</button>}
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className='loading-base'>
             <div className='loading-container'>
-                { props.progress === undefined ? (
-                    <h3>Loading TMS...</h3>
+                { props.progress === undefined || mp === undefined ? (
+                    <h3>Loading...</h3>
                 ) : (
                     <div>
                         <div className="progress">
@@ -42,8 +57,8 @@ function Loading (props) {
                             />
                         </div>
                         <h3>
-                            Loading JSON...
-                            {mp - p} / {mp}
+                            {props.label || 'Loading...'}
+                            {' '}{mp - p} / {mp}
                         </h3>
                     </div>
                 )}
@@ -58,9 +73,35 @@ export default class Main extends React.Component {
         this.state = {
             expandedSubMenu: false,
             loadJson: true,
+            loadError: null,
         };
         this.temp={};
+        this.jsonGeneration = 0;
+        this.jsonLoadStart = 0;
         this.toggleExpandSubMenu = this.toggleExpandSubMenu.bind(this);
+        this.retryJsonLoad = this.retryJsonLoad.bind(this);
+        this.onVisible = this.onVisible.bind(this);
+    }
+
+    componentWillUnmount() {
+        document.removeEventListener('visibilitychange', this.onVisible);
+        window.removeEventListener('pageshow', this.onVisible);
+    }
+
+    // Mobile browsers can suspend a backgrounded tab mid-fetch; on resume the
+    // request is often silently dead. If the tab becomes visible again while
+    // we're still stuck loading JSON (past the normal fetch timeout), retry
+    // instead of leaving the user stuck on the loading screen forever.
+    onVisible() {
+        if (document.visibilityState !== 'visible') return;
+        if (this.state.items || !this.props.resources) return;
+        if (Date.now() - this.jsonLoadStart < FETCH_TIMEOUT_MS) return;
+        this.retryJsonLoad();
+    }
+
+    retryJsonLoad() {
+        this.setState({ loadError: null });
+        this.getJsonResources(this.props.resources);
     }
 
     toggleExpandSubMenu() {
@@ -68,8 +109,12 @@ export default class Main extends React.Component {
     }
 
     getJsonResources = async (resources) => {
+        const generation = ++this.jsonGeneration;
+        const isStale = () => generation !== this.jsonGeneration;
+        this.temp = {};
+        this.jsonLoadStart = Date.now();
         var downcounter = {progress: 0};
-        
+
         const jsonResourcList = [
             [resources.loadresource_itemcategories, "itemcategories"],
             [resources.loadresource_items, "items"],
@@ -85,21 +130,29 @@ export default class Main extends React.Component {
         this.setState({
             progress: p,
             maxProgress: p,
+            loadError: null,
         });
 
         // parallelly send out jsonResourcList requests
-        await Promise.all(jsonResourcList.map(([loadResource, resourceName]) =>
-            this.getJsonResource(loadResource, resourceName, downcounter)
-        ));
+        try {
+            await Promise.all(jsonResourcList.map(([loadResource, resourceName]) =>
+                this.getJsonResource(loadResource, resourceName, downcounter, isStale)
+            ));
+        } catch (err) {
+            if (isStale()) return;
+            console.warn('Main: JSON loading failed', err);
+            this.setState({ loadError: err });
+        }
     }
 
-    getJsonResource = async (resource, name, downcounter) => {
+    getJsonResource = async (resource, name, downcounter, isStale) => {
         const that = this;
         downcounter.progress += resource.length;
         await Promise.all(resource.map(
-            path => that.getJsonData(process.env.PUBLIC_URL+DATA_BASE+path.replace('@','/'), name, that, downcounter)
+            path => that.getJsonData(process.env.PUBLIC_URL+DATA_BASE+path.replace('@','/'), name, that, downcounter, isStale)
         ));
 
+        if (isStale()) return;
         this.setState({progress: this.state.progress - resource.length});
     }
     countConditions = (effect, item, type) => {
@@ -449,15 +502,19 @@ export default class Main extends React.Component {
         debug(this.temp);
     }
     
-    getJsonData = (fileName, name, that, downcounter) =>
-        fetch(fileName+".json", {
-            headers: { 
+    getJsonData = (fileName, name, that, downcounter, isStale) =>
+        fetchWithTimeout(fileName+".json", {
+            headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             }
+        }, FETCH_TIMEOUT_MS)
+        .then(response => {
+            if (!response.ok) throw new Error(`${fileName}.json: HTTP ${response.status}`);
+            return response.json();
         })
-        .then(response => response.json())
         .then(json => {
+          if (isStale()) return;
           that.temp[name] = that.temp[name] || [];
           that.temp[name] = that.temp[name].concat(json);
           downcounter.progress--;
@@ -470,9 +527,12 @@ export default class Main extends React.Component {
 
     componentDidMount() {
        debug(this.props);
+       document.addEventListener('visibilitychange', this.onVisible);
+       window.addEventListener('pageshow', this.onVisible);
     }
 
     componentDidUpdate() {
+        if (!this.props.resources || !this.props.maps) return;
         if (!this.state.items && this.state.loadJson) {
             this.setState({loadJson: false});
             getCachedData(MAIN_CACHE_KEY).then((cached) => {
@@ -500,10 +560,23 @@ export default class Main extends React.Component {
                     {/* Loading part */}
                     {
                         !this.state.items ? (
-                        <Loading
-                            progress={this.state.progress}
-                            maxProgress={this.state.maxProgress}
-                        />
+                        this.props.resources ? (
+                            <Loading
+                                progress={this.state.progress}
+                                maxProgress={this.state.maxProgress}
+                                label="Loading JSON..."
+                                error={this.state.loadError}
+                                onRetry={this.retryJsonLoad}
+                            />
+                        ) : (
+                            <Loading
+                                progress={this.props.mapsProgress}
+                                maxProgress={this.props.mapsMaxProgress}
+                                label="Loading maps..."
+                                error={this.props.loadError}
+                                onRetry={this.props.onRetryLoad}
+                            />
+                        )
                     ) : (
                         <div>
                             <Switch>
